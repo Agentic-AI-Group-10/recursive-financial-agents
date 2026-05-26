@@ -13,6 +13,7 @@ AI Agent class project repository for Group 10: Non-Monetary Performance Metrics
 *possible subsection about the project*
 
 # Updates
+**05/26/2026 18:23** - I think I added you to the Google project? And possibly another Google cloud project too.
 **05/26/2026 18:10** - Added ai_notes for things that don't make it in the markdown outputs in my AI chats (more than you would think).
 
 **05/26/2026 15:51** - Uploaded new project manifest, road map, cloud guide, prompt suggestion for AI prompting.
