@@ -12,6 +12,12 @@
 *   [ ] **Setup Antigravity "Bridge":** Configure SSH keys so Antigravity can talk to the GCP VM (for DB/Logs) and MIT Supercloud (for execution).
 *   [ ] **Environment Variables:** Create a `.env` file locally to store Project IDs and API Keys safely.
 
+## Phase 2.5: Data Engineering (The "Simulation Pack")
+*   [ ] **Acquire Datasets:** Download $SPY price data and Kaggle "Daily Financial News" locally.
+*   [ ] **Build the Joiner:** Write a script in Antigravity to merge Price and News into a single `simulation_pack.csv`.
+*   [ ] **Temporal Validation:** Verify that news timestamps are correctly aligned to prevent the agent from seeing "future" headlines during the backtest.
+*   [ ] **Deploy to Foundry:** Upload the `simulation_pack.csv` to the MIT Supercloud `/data` directory.
+
 ## Phase 3: Supercloud Preparation (The Foundry)
 *   [ ] **Stage Historical Data:** Upload $SPY price data to the Supercloud `/data` directory.
 *   [ ] **Verify Local LLM:** Identify the path for Llama-3/Mistral on the Supercloud.
