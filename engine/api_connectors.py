@@ -68,7 +68,11 @@ class APIConnector:
             model (str): Optional. Model identifier (defaults based on provider).
             pacing_delay (float): Seconds to sleep between calls to avoid rate limits (e.g. 15 RPM on Gemini Free Tier).
         """
+        # Auto-detect provider if model belongs to DeepInfra (e.g., contains '/' or matches DeepInfra families)
         self.provider = provider.lower()
+        if self.provider == "google" and model and ("/" in model or "llama" in model.lower() or "deepseek" in model.lower() or "qwen" in model.lower() or "glm" in model.lower() or "kimi" in model.lower()):
+            self.provider = "deepinfra"
+
         self.pacing_delay = pacing_delay
         self.last_call_time = 0.0
         
@@ -109,7 +113,7 @@ class APIConnector:
             method="POST"
         )
         try:
-            with urllib.request.urlopen(req, timeout=30) as response:
+            with urllib.request.urlopen(req, timeout=120) as response:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             error_body = e.read().decode("utf-8")
@@ -117,7 +121,7 @@ class APIConnector:
         except Exception as e:
             raise RuntimeError(f"Failed to execute API call: {e}")
 
-    def query(self, prompt, temperature=0.2, max_tokens=500):
+    def query(self, prompt, temperature=0.2, max_tokens=8192):
         """
         Sends a text prompt to the configured model.
         
@@ -212,6 +216,40 @@ class APIConnector:
             "tokens_out": tokens_out,
             "cost": cost
         }
+
+    def embed(self, text):
+        """
+        Retrieves a 768-dimensional vector embedding for the input text
+        using Google AI Studio's 'text-embedding-004' model.
+        
+        Args:
+            text (str): The text string to embed.
+            
+        Returns:
+            list of float: The 768-dimensional embedding vector.
+        """
+        self._pace_request()
+        # Ensure we have a valid key for Google, even if provider is deepinfra
+        api_key = self.api_key if self.provider == "google" else os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY is required for generating text-embedding-004 embeddings.")
+            
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-2:embedContent?key={api_key}"
+        headers = {"Content-Type": "application/json"}
+        payload = {
+            "content": {
+                "parts": [{"text": text}]
+            },
+            "outputDimensionality": 768
+        }
+        
+        response = self._post_request(url, headers, payload)
+        
+        try:
+            embedding_values = response["embedding"]["values"]
+            return embedding_values
+        except (KeyError, TypeError):
+            raise RuntimeError(f"Failed to parse embedding response payload: {json.dumps(response)}")
 
 
 # Quick Verification Sandbox

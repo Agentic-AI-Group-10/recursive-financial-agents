@@ -43,25 +43,17 @@ log "Status: Active SSH: $ACTIVE_SSH_SESSIONS, VSCode: $ACTIVE_VSCODE, Tmux/Scre
 
 # 5. Handle active users or processes with safety delays / cancel
 if [ "$ACTIVE_SSH_SESSIONS" -gt 0 ]; then
-    MSG="[Auto-Shutdown] Postponed: Active SSH sessions ($ACTIVE_SSH_SESSIONS) detected. Will retry next schedule."
+    MSG="[Auto-Shutdown] Postponed: Active interactive SSH sessions ($ACTIVE_SSH_SESSIONS) detected. Will retry next schedule."
     log "$MSG"
     wall "$MSG"
     exit 0
 fi
 
-if [ "$ACTIVE_VSCODE" -gt 0 ]; then
-    MSG="[Auto-Shutdown] Postponed: Active VS Code remote session detected."
-    log "$MSG"
-    wall "$MSG"
-    exit 0
-fi
-
-if [ "$ACTIVE_TMUX_SCREEN" -gt 0 ]; then
-    MSG="[Auto-Shutdown] Postponed: Active TMUX/Screen sessions detected."
-    log "$MSG"
-    wall "$MSG"
-    exit 0
-fi
+# NOTE: We do not automatically postpone on active VSCode remote node servers ($ACTIVE_VSCODE)
+# or idle Tmux sessions ($ACTIVE_TMUX_SCREEN) if there are no live interactive SSH users
+# and no active Python processes or CPU loads. This ensures that when a developer closes
+# their laptop (disconnecting from SSH but leaving VS Code Remote servers running), 
+# the VM can safely power off to avoid wasting money.
 
 if [ "$ACTIVE_PYTHON_PROCS" -gt 0 ]; then
     MSG="[Auto-Shutdown] Postponed: Active Python processes ($ACTIVE_PYTHON_PROCS) are running (e.g. trading simulations)."

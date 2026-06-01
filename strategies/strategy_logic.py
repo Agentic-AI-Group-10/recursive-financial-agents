@@ -9,11 +9,11 @@ def calculate_ema(prices, period):
     
     prices_arr = np.array(prices, dtype=float)
     
+    # Initialize EMA with SMA for the first 'period' values
     # Ensure there are enough prices for the initial SMA
     if len(prices_arr) < period:
         return None
     
-    # Calculate initial SMA for the first 'period' values
     ema_values = np.zeros_like(prices_arr, dtype=float)
     ema_values[period - 1] = np.mean(prices_arr[:period])
     
@@ -54,6 +54,8 @@ def calculate_rsi(prices, period):
     rsi = 100 - (100 / (1 + rs))
 
     # For subsequent periods, use Wilder's smoothing
+    # Note: The provided prices list already contains all historical prices up to current.
+    # We need to calculate RSI based on the *entire* relevant history.
     # The loop below correctly updates avg_gain and avg_loss for the latest period.
     for i in range(period, len(gains)):
         avg_gain = (avg_gain * (period - 1) + gains[i]) / period
@@ -71,8 +73,7 @@ def calculate_rsi(prices, period):
 def decide(current_price, price_history, news_context):
     """
     Self-improved trading strategy incorporating enhanced sentiment analysis,
-    more flexible EMA/price action signals, and RSI to increase trading frequency
-    while maintaining confirmation.
+    EMA crossovers, and RSI to make more robust decisions.
     
     Parameters:
         current_price (float): The current day's closing price for SPY.
@@ -105,6 +106,7 @@ def decide(current_price, price_history, news_context):
     
     for keyword, weight in sentiment_keywords.items():
         # Use regex for whole word/phrase matching
+        # re.escape handles special characters in keywords
         pattern = r'\b' + re.escape(keyword) + r'\b'
         
         # Find all occurrences of the keyword
@@ -132,8 +134,7 @@ def decide(current_price, price_history, news_context):
     
     # Ensure enough data for robust indicator calculations
     # RSI needs at least period + 1 prices for initial calculation
-    # We also need at least 2 prices for current_price vs all_prices[-2] comparison
-    required_history_length = max(LONG_EMA_PERIOD, RSI_PERIOD + 1, 2) 
+    required_history_length = max(LONG_EMA_PERIOD, RSI_PERIOD + 1)
     if len(all_prices) < required_history_length:
         # Not enough data for robust indicators, default to HOLD
         return "HOLD"
@@ -145,13 +146,14 @@ def decide(current_price, price_history, news_context):
     # Calculate RSI
     rsi = calculate_rsi(all_prices, RSI_PERIOD)
     
-    # Safeguard against any unexpected None from indicator calculations
+    # Safeguard against any unexpected None from indicator calculations (should be handled by length check)
     if short_ema is None or long_ema is None or rsi is None:
         return "HOLD" 
 
     # --- 3. Refined Decision Logic ---
     
     # Define thresholds for sentiment and RSI
+    # RELAXED SENTIMENT THRESHOLDS to increase trade frequency
     BULLISH_SENTIMENT_THRESHOLD = 1.0 
     BEARISH_SENTIMENT_THRESHOLD = -1.0 
     RSI_OVERBOUGHT = 70
@@ -161,31 +163,30 @@ def decide(current_price, price_history, news_context):
     bullish_tech_signal = False
     bearish_tech_signal = False
     
-    # --- Two-tiered Bullish Technical Signal ---
-    # Tier 1: Strong EMA Crossover AND not overbought
-    if short_ema > long_ema and rsi < RSI_OVERBOUGHT:
+    # EMA Crossover (Simplified: Removed current_price confirmation for less lag and more activity)
+    # Bullish: Short EMA above Long EMA
+    if short_ema > long_ema:
         bullish_tech_signal = True
-    # Tier 2: Price above short EMA AND daily price increase AND not overbought (less lagging)
-    elif current_price > short_ema and current_price > all_prices[-2] and rsi < RSI_OVERBOUGHT:
-        bullish_tech_signal = True
-
-    # --- Two-tiered Bearish Technical Signal ---
-    # Tier 1: Strong EMA Crossover AND not oversold
-    if short_ema < long_ema and rsi > RSI_OVERSOLD:
-        bearish_tech_signal = True
-    # Tier 2: Price below short EMA AND daily price decrease AND not oversold (less lagging)
-    elif current_price < short_ema and current_price < all_prices[-2] and rsi > RSI_OVERSOLD:
+    # Bearish: Short EMA below Long EMA
+    elif short_ema < long_ema:
         bearish_tech_signal = True
         
+    # RSI as a filter: Prevent buying into overbought conditions or selling into oversold conditions
+    # This filter remains crucial for risk management.
+    if bullish_tech_signal and rsi >= RSI_OVERBOUGHT:
+        bullish_tech_signal = False # Overbought, do not buy
+    if bearish_tech_signal and rsi <= RSI_OVERSOLD:
+        bearish_tech_signal = False # Oversold, do not sell
+        
     # Combine all signals for final decision
-    # The AND logic is retained, but individual technical conditions are less strict,
+    # The AND logic is retained, but individual conditions are less strict,
     # aiming for more frequent, yet still confirmed, trades.
     
-    # BUY condition: Moderately bullish sentiment AND confirmed bullish technicals (either tier 1 or tier 2)
+    # BUY condition: Moderately bullish sentiment AND confirmed bullish technicals (EMA crossover, not overbought)
     if net_sentiment_score >= BULLISH_SENTIMENT_THRESHOLD and bullish_tech_signal:
         return "BUY"
     
-    # SELL condition: Moderately bearish sentiment AND confirmed bearish technicals (either tier 1 or tier 2)
+    # SELL condition: Moderately bearish sentiment AND confirmed bearish technicals (EMA crossover, not oversold)
     elif net_sentiment_score <= BEARISH_SENTIMENT_THRESHOLD and bearish_tech_signal:
         return "SELL"
     
