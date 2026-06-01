@@ -23,13 +23,14 @@ The project operates across four distinct environments:
 *   **Domain:** Quantitative Trading of a single ticker ($SPY).
 *   **Strategy Interface:** The "Worker Agent" only writes the `decide()` function within a fixed `strategy_logic.py` file.
 *   **The Meta-Loop:** The system will run for **100 generations or 6 hours**, whichever comes first.
+*   **Dual-Dataset Comparative Trial:** The system runs comparative benchmarks on a high-signal filtered dataset (`simulation_pack_filtered.csv`) versus a full unfiltered dataset (`simulation_pack_unfiltered.csv` with a 100 headline-per-bar cap) to measure signal-to-noise impact on agentic self-improvement.
 *   **Safety & Review:** Antigravity is instructed to **automatically open Pull Requests (PRs)**. Humans must review and approve these PRs.
 *   **Budgeting:**
     *   **$50 Startup Fund:** Allocated for Gemini AI API tokens and energy estimation costs.
     *   **$300 GCP Credits:** Allocated for persistent cloud infrastructure (DBs, Dashboards, and Proxy Servers).
 
 ## 5. Measurement & Success Metrics
-The system optimizes for the **Efficiency Score**:
+The system optimizes for the **Efficiency Score** (Net AROI):
 $$Score = \frac{Simulated \ Profit \ (USD)}{(Tokens \times Price) + (Joules \times Carbon \ Cost)}$$
 
 ## 6. Directory Structure Reference
@@ -38,6 +39,7 @@ $$Score = \frac{Simulated \ Profit \ (USD)}{(Tokens \times Price) + (Joules \tim
 *   `/telemetry`: `results.json` and OTel logs.
 *   `/ltm`: Long-Term Memory (hosted on **GCP PostgreSQL**).
 *   `/docs`: PR summaries and conversation logs.
+*   `/data`: Contains local datasets, including `spy_prices.csv`, `simulation_pack_filtered.csv`, and `simulation_pack_unfiltered.csv` (excluded from git).
 
 ## 7. Research Links & Resources (Summary)
 - GitHub: https://github.com/Agentic-AI-Group-10/recursive-financial-agents

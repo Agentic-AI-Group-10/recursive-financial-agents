@@ -50,7 +50,7 @@ def load_price_data(price_path):
     print(f"Loaded price data successfully. Range: {df.index.min()} to {df.index.max()} ({len(df)} rows)")
     return df
 
-def load_news_data(news_paths, start_time, end_time):
+def load_news_data(news_paths, start_time, end_time, filter_signal=True):
     """Loads, filters, and standardizes news data within the active date range."""
     news_dfs = []
     
@@ -112,6 +112,10 @@ def load_news_data(news_paths, start_time, end_time):
     combined_news = pd.concat(news_dfs, ignore_index=True)
     combined_news = combined_news.sort_values(by='date')
     
+    if not filter_signal:
+        print(f"Skipping signal filtering (Unfiltered mode active). Kept {len(combined_news)} raw news rows.")
+        return combined_news
+        
     # Step 2: Signal Filtering (Macro keywords or Mega-Cap tickers)
     print("Filtering news for macro signal and mega-cap S&P 500 components...")
     
@@ -129,7 +133,7 @@ def load_news_data(news_paths, start_time, end_time):
     print(f"Filtered news rows from {len(combined_news)} down to {len(filtered_news)} high-signal rows.")
     return filtered_news
 
-def build_simulation_pack(price_df, news_df, lookback_hours=24):
+def build_simulation_pack(price_df, news_df, lookback_hours=24, max_headlines=-1):
     """Joins price timeline with news context using strict point-in-time constraints."""
     print(f"\n--- Joining Price and News (Look-back window: {lookback_hours} hours) ---")
     
@@ -160,6 +164,11 @@ def build_simulation_pack(price_df, news_df, lookback_hours=24):
             batch_headlines = news_headlines[start_idx:end_idx]
             batch_tickers = news_tickers[start_idx:end_idx]
             
+            # Limit number of headlines to prevent exceeding LLM context windows in unfiltered mode
+            if max_headlines > 0 and len(batch_headlines) > max_headlines:
+                batch_headlines = batch_headlines[-max_headlines:]
+                batch_tickers = batch_tickers[-max_headlines:]
+                
             # Format as: "TICKER: Headline 1 | TICKER: Headline 2"
             formatted_list = [f"[{t}]: {h}" for t, h in zip(batch_tickers, batch_headlines)]
             joined_context = " | ".join(formatted_list)
@@ -181,10 +190,19 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Create Simulation Pack (Unified Price + News timeline)")
     parser.add_argument("--price-file", type=str, default="data/spy_prices.csv", help="SPY price file path")
     parser.add_argument("--lookback", type=int, default=24, help="News look-back window in hours (default: 24)")
-    parser.add_argument("--output", type=str, default="data/simulation_pack.csv", help="Path to save simulation pack (default: data/simulation_pack.csv)")
+    parser.add_argument("--no-filter", action="store_true", help="Include all raw news without applying macro/mega-cap filters")
+    parser.add_argument("--max-headlines", type=int, default=100, help="Maximum headlines per trading bar in unfiltered mode (default: 100, use -1 for unlimited)")
+    parser.add_argument("--output", type=str, default=None, help="Path to save simulation pack (default: data/simulation_pack_[filtered/unfiltered].csv)")
     
     args = parser.parse_args()
     
+    # Determine default output file name based on filtering
+    if args.output is None:
+        if args.no_filter:
+            args.output = "data/simulation_pack_unfiltered.csv"
+        else:
+            args.output = "data/simulation_pack_filtered.csv"
+            
     # Paths to the downloaded news files
     news_files = [
         "data/news/analyst_ratings_processed.csv",
@@ -203,10 +221,14 @@ if __name__ == "__main__":
     price_end = price_df.index.max()
     
     # 3. Load and filter news
-    news_df = load_news_data(news_files, price_start, price_end)
+    news_df = load_news_data(news_files, price_start, price_end, filter_signal=not args.no_filter)
     
     # 4. Perform the temporal join
-    simulation_pack = build_simulation_pack(price_df, news_df, lookback_hours=args.lookback)
+    simulation_pack = build_simulation_pack(
+        price_df, news_df, 
+        lookback_hours=args.lookback, 
+        max_headlines=args.max_headlines if args.no_filter else -1
+    )
     
     # 5. Save results
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
