@@ -3,6 +3,12 @@ import re
 
 # --- Helper Functions for Technical Indicators ---
 
+def calculate_sma(prices, period):
+    """Calculates the Simple Moving Average (SMA) for the latest price."""
+    if len(prices) < period:
+        return None
+    return np.mean(prices[-period:])
+
 def calculate_ema(prices, period):
     """Calculates the Exponential Moving Average (EMA) for the latest price."""
     if len(prices) < period:
@@ -28,27 +34,41 @@ def calculate_ema_series(data, period):
         ema_values[i] = (data_arr[i + period - 1] - ema_values[i-1]) * multiplier + ema_values[i-1]
     return ema_values
 
-def calculate_rsi(prices, period):
-    """Calculates the Relative Strength Index (RSI) for the latest price."""
+def calculate_rsi(prices, period=14):
+    """
+    Calculates the Relative Strength Index (RSI) using Wilder's smoothing method.
+    """
     if len(prices) < period + 1:
         return None
+    
     prices_arr = np.array(prices, dtype=float)
     deltas = np.diff(prices_arr)
-    if len(deltas) < period:
-        return None
     
-    gains = np.where(deltas > 0, deltas, 0)
-    losses = np.where(deltas < 0, -deltas, 0)
-
-    avg_gain = np.mean(gains[:period])
-    avg_loss = np.mean(losses[:period])
-
-    for i in range(period, len(gains)):
-        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
-        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+    # Initial average gain/loss
+    seed_gains = deltas[:period][deltas[:period] >= 0].sum()
+    seed_losses = -deltas[:period][deltas[:period] < 0].sum()
+    
+    avg_gain = seed_gains / period
+    avg_loss = seed_losses / period
+    
+    # Wilder's smoothing for subsequent values
+    for i in range(period, len(deltas)):
+        delta = deltas[i]
+        if delta >= 0:
+            gain = delta
+            loss = 0.0
+        else:
+            gain = 0.0
+            loss = -delta
         
-    rs = np.inf if avg_loss == 0 else avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
+        avg_gain = (avg_gain * (period - 1) + gain) / period
+        avg_loss = (avg_loss * (period - 1) + loss) / period
+        
+    if avg_loss == 0:
+        return 100.0
+    
+    rs = avg_gain / avg_loss
+    rsi = 100.0 - (100.0 / (1.0 + rs))
     return rsi
 
 def calculate_macd(prices, short_period=12, long_period=26, signal_period=9):
@@ -75,8 +95,8 @@ def calculate_macd(prices, short_period=12, long_period=26, signal_period=9):
 
 def decide(current_price, price_history, news_context):
     """
-    A self-improved, multi-regime trading strategy that adds MACD for momentum
-    confirmation to its adaptive trend-following and mean-reversion logic.
+    A self-improved, multi-regime trading strategy with enhanced risk management
+    for its mean-reversion logic and more precise technical indicators.
 
     Parameters:
         current_price (float): The current day's closing price for SPY.
@@ -86,17 +106,20 @@ def decide(current_price, price_history, news_context):
     Returns:
         str: "BUY", "SELL", or "HOLD"
     """
-    # --- 1. Sentiment Analysis with Nuanced Keywords ---
+    # --- 1. Sentiment Analysis with Expanded Keywords ---
     context_lower = news_context.lower()
     sentiment_keywords = {
         "fed pivot": 3.0, "rate cut": 2.5, "stimulus": 2.0, "soft landing": 2.0,
         "dovish": 2.0, "record high": 2.0, "bullish": 2.0, "surge": 2.0,
         "strong earnings": 2.0, "cooling inflation": 1.5, "disinflation": 1.5,
+        "ai boom": 2.0, "technological breakthrough": 2.0, "easing tensions": 1.5,
         "beat": 1.5, "growth": 1.5, "recovery": 1.5, "upgrade": 1.5,
         "rate hike": -2.5, "recession": -2.5, "crisis": -2.5, "bankruptcy": -2.5,
         "hard landing": -2.5, "stagflation": -2.5, "hawkish": -2.0, "bearish": -2.0,
         "plunge": -2.0, "inflation": -2.0, "sell-off": -2.0, "weak earnings": -2.0,
-        "tightening": -1.5, "miss": -1.5, "downgrade": -1.5, "tariff": -1.5
+        "geopolitical risk": -2.0, "market turmoil": -2.0, "credit crunch": -2.5,
+        "tightening": -1.5, "miss": -1.5, "downgrade": -1.5, "tariff": -1.5,
+        "supply chain disruption": -1.5
     }
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids"]
     net_sentiment_score = 0.0
@@ -115,10 +138,11 @@ def decide(current_price, price_history, news_context):
     LONG_EMA_PERIOD = 26
     MACD_SIGNAL_PERIOD = 9
     RSI_PERIOD = 14
+    MEDIUM_TERM_SMA_PERIOD = 50
     VOL_SHORT_PERIOD = 20
     VOL_LONG_PERIOD = 100
 
-    required_history_length = max(LONG_EMA_PERIOD + MACD_SIGNAL_PERIOD, RSI_PERIOD + 1, VOL_LONG_PERIOD + 1)
+    required_history_length = max(LONG_EMA_PERIOD + MACD_SIGNAL_PERIOD, RSI_PERIOD + 1, VOL_LONG_PERIOD + 1, MEDIUM_TERM_SMA_PERIOD)
     if len(all_prices) < required_history_length:
         return "HOLD"
 
@@ -142,8 +166,8 @@ def decide(current_price, price_history, news_context):
         # === CRISIS MODE: High-conviction trend-following with momentum confirmation ===
         BULLISH_SENTIMENT_THRESHOLD = 2.0
         BEARISH_SENTIMENT_THRESHOLD = -2.0
-        RSI_OVERBOUGHT = 65
-        RSI_OVERSOLD = 35
+        RSI_OVERBOUGHT = 70
+        RSI_OVERSOLD = 30
 
         bullish_trend = short_ema > long_ema
         bearish_trend = short_ema < long_ema
@@ -172,13 +196,19 @@ def decide(current_price, price_history, news_context):
             elif net_sentiment_score <= BEARISH_SENTIMENT_THRESHOLD and bearish_trend and macd_histogram < 0 and rsi > RSI_OVERSOLD:
                 return "SELL"
         else:
-            # Sub-Regime: Choppy / Ranging Market (Mean-Reversion Logic)
+            # Sub-Regime: Choppy / Ranging Market (Mean-Reversion with Safety Filter)
             MEAN_REVERSION_RSI_OVERSOLD = 25
             MEAN_REVERSION_RSI_OVERBOUGHT = 75
             
-            if rsi < MEAN_REVERSION_RSI_OVERSOLD and net_sentiment_score > -1.5:
+            medium_sma = calculate_sma(all_prices, MEDIUM_TERM_SMA_PERIOD)
+            if medium_sma is None:
+                return "HOLD" # Not enough data for the safety filter
+
+            # Buy the dip only if the medium-term trend isn't collapsing
+            if rsi < MEAN_REVERSION_RSI_OVERSOLD and net_sentiment_score > -1.5 and current_price > medium_sma:
                 return "BUY"
-            elif rsi > MEAN_REVERSION_RSI_OVERBOUGHT and net_sentiment_score < 1.5:
+            # Sell the rip only if the medium-term trend isn't rocketing up
+            elif rsi > MEAN_REVERSION_RSI_OVERBOUGHT and net_sentiment_score < 1.5 and current_price < medium_sma:
                 return "SELL"
 
     return "HOLD"
