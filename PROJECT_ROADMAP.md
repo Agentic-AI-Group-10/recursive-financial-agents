@@ -3,7 +3,7 @@
 ## Phase 1: Core Infrastructure & Nerve Center (GCP)
 *   [x] **GCP Project Setup:** Create a new project in the GCP Console and ensure credits are active.
 *   [ ] **Provision "Nerve Center" VM:** Setup a Linux (Ubuntu) instance on Compute Engine.
-*   [ ] **Initialize Database:** Install PostgreSQL and the `pgvector` extension for Long-Term Memory (LTM).
+*   [ ] **Initialize Database:** Install PostgreSQL and the `pgvector` extension for Long-Term Memory (LTM). *(Schema prepared in [database/schema.sql](file:///home/ow9800/recursive-financial-agents/database/schema.sql))*
 *   [ ] **Deploy Telemetry Hub:** Setup a basic dashboard (Streamlit) on the VM to track Efficiency Scores.
 *   [x] **Collaboration Setup:** Add your partner to the GCP Project
 *   [ ] **Collaboration Setup part 2** and the GitHub repo.
@@ -36,7 +36,7 @@
 *   [x] **Build Backtesting Engine:** Implement the core daily simulation engine with point-in-time left-join compliance, transactional fees, full P&L metrics, and hardware/token telemetry tracking (`backtest_engine.py`).
 *   [ ] **Stage Historical Data:** Upload all four simulation pack CSVs to Supercloud `/data`.
 *   [ ] **Verify Local LLM:** Identify the path for Llama-3/Mistral on the Supercloud.
-*   [ ] **Finalize Engine:** Upload `backtest_engine.py` and `submit_job.sh` to Supercloud.
+*   [x] **Finalize Engine & Submit Script:** Create [backtest_engine.py](file:///home/ow9800/recursive-financial-agents/engine/backtest_engine.py) and SLURM execution template [scripts/submit_job.sh](file:///home/ow9800/recursive-financial-agents/scripts/submit_job.sh) locally.
 
 ## Phase 4: Recursive Loop Development
 *   [ ] **Build the "Architect" Skill:** In Antigravity, write the logic that queries GCP LTM for past failures before generating new code.

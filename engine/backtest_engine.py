@@ -100,7 +100,7 @@ class BacktestEngine:
             print(f"CRITICAL: Failed to load strategy module. Error: {e}")
             raise e
 
-    def run(self, estimate_llm_tokens=False, model_tdp_mode="cpu"):
+    def run(self, estimate_llm_tokens=False, model_tdp_mode="cpu", plot_path=None):
         """Executes the daily simulation loop."""
         decide_func = self.load_strategy()
         
@@ -229,7 +229,12 @@ class BacktestEngine:
             tdp = DEFAULT_GPU_TDP if model_tdp_mode == "gpu" else DEFAULT_CPU_TDP
             total_joules = elapsed_seconds * tdp
             
-        return self.compile_metrics(portfolio_history, trade_log, elapsed_seconds, total_joules, measured_energy)
+        results = self.compile_metrics(portfolio_history, trade_log, elapsed_seconds, total_joules, measured_energy)
+        
+        if plot_path:
+            self.generate_performance_chart(portfolio_history, trade_log, plot_path)
+            
+        return results
 
     def compile_metrics(self, history, trade_log, elapsed_time, joules, measured_energy):
         """Compiles backtesting statistics, P&L, token pricing, and final Net AROI score."""
@@ -327,6 +332,81 @@ class BacktestEngine:
         
         return results
 
+    def generate_performance_chart(self, history, trade_log, output_path):
+        """Generates a high-fidelity performance chart (Equity Curve, Drawdown, Trade Markers)."""
+        try:
+            import matplotlib.pyplot as plt
+            import matplotlib.dates as mdates
+        except ImportError:
+            print("Matplotlib not found. Attempting to install...")
+            import subprocess
+            try:
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "matplotlib"])
+                import matplotlib.pyplot as plt
+                import matplotlib.dates as mdates
+            except Exception as e:
+                print(f"Could not install matplotlib, skipping chart generation. Error: {e}")
+                return False
+                
+        print(f"Generating performance chart: {output_path}...")
+        
+        # Setup style (elegant dark mode)
+        plt.style.use('dark_background')
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True, gridspec_kw={'height_ratios': [3, 1]})
+        
+        timestamps = self.df.index
+        
+        # Normalized curves
+        strategy_curve = np.array(history) / self.initial_cash * 100.0
+        spy_prices = self.df['Close'].values
+        spy_curve = spy_prices / spy_prices[0] * 100.0
+        
+        # Plot Plot 1: Equity Curves
+        ax1.plot(timestamps, strategy_curve, label='Agent Strategy', color='#00f0ff', linewidth=2)  # Neon Cyan
+        ax1.plot(timestamps, spy_curve, label='SPY Buy & Hold', color='#ffb700', linestyle='--', linewidth=1.5, alpha=0.7)  # Gold
+        
+        # Plot BUY/SELL markers
+        buys = [t for t in trade_log if t['action'] == 'BUY']
+        sells = [t for t in trade_log if t['action'] == 'SELL']
+        
+        if buys:
+            buy_dates = pd.to_datetime([b['date'] for b in buys]).tz_localize('UTC')
+            buy_vals = [history[self.df.index.get_loc(d)] / self.initial_cash * 100.0 for d in buy_dates]
+            ax1.scatter(buy_dates, buy_vals, label='BUY Trade', color='#00ff44', marker='^', s=100, zorder=5)  # Neon Green
+            
+        if sells:
+            sell_dates = pd.to_datetime([s['date'] for s in sells]).tz_localize('UTC')
+            sell_vals = [history[self.df.index.get_loc(d)] / self.initial_cash * 100.0 for d in sell_dates]
+            ax1.scatter(sell_dates, sell_vals, label='SELL Trade', color='#ff0077', marker='v', s=100, zorder=5)  # Hot Pink
+            
+        ax1.set_ylabel('Normalized Equity (%)', fontsize=11)
+        ax1.set_title(f'Agent Performance Analysis (Total Return: {strategy_curve[-1]-100:.2f}% | SPY: {spy_curve[-1]-100:.2f}%)', fontsize=13, fontweight='bold', pad=15)
+        ax1.grid(True, color='#444444', linestyle=':', alpha=0.6)
+        ax1.legend(loc='upper left', framealpha=0.4)
+        
+        # Plot Plot 2: Drawdowns
+        peaks = np.maximum.accumulate(history)
+        drawdowns = (history - peaks) / peaks * 100.0
+        ax2.fill_between(timestamps, drawdowns, 0, label='Strategy Drawdown', color='#ff0055', alpha=0.3)
+        ax2.plot(timestamps, drawdowns, color='#ff0055', linewidth=1)
+        
+        ax2.set_ylabel('Drawdown (%)', fontsize=11)
+        ax2.set_ylim(-30 if drawdowns.min() < -20 else -15, 1)
+        ax2.grid(True, color='#444444', linestyle=':', alpha=0.6)
+        ax2.legend(loc='lower left', framealpha=0.4)
+        
+        # Formatting X-axis dates
+        ax2.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+        ax2.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
+        plt.xticks(rotation=45)
+        
+        plt.tight_layout()
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        plt.savefig(output_path, dpi=150)
+        plt.close()
+        print(f"Chart successfully saved to: {output_path}")
+        return True
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Recursive Agentic System Backtesting Engine")
     parser.add_argument("--data-file", type=str, required=True, help="Path to simulation pack CSV (filtered/unfiltered)")
@@ -336,6 +416,7 @@ if __name__ == "__main__":
     parser.add_argument("--estimate-tokens", action="store_true", help="Automatically estimate input/output tokens from news context size if strategy uses LLMs")
     parser.add_argument("--hardware-mode", type=str, default="cpu", choices=["cpu", "gpu"], help="Target hardware execution tracking profile (default: cpu)")
     parser.add_argument("--output", type=str, default="telemetry/results.json", help="Path to save simulation telemetry results (default: telemetry/results.json)")
+    parser.add_argument("--plot-path", type=str, default=None, help="Path to save visual PNG equity curve chart (e.g. telemetry/equity_curve.png)")
     
     args = parser.parse_args()
     
@@ -349,7 +430,8 @@ if __name__ == "__main__":
         
         results = engine.run(
             estimate_llm_tokens=args.estimate_tokens,
-            model_tdp_mode=args.hardware_mode
+            model_tdp_mode=args.hardware_mode,
+            plot_path=args.plot_path
         )
         
         # Save output
