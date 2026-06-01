@@ -15,43 +15,7 @@ def calculate_ema(prices, period):
         ema_values[i] = (prices_arr[i] - ema_values[i-1]) * multiplier + ema_values[i-1]
     return ema_values[-1]
 
-def calculate_macd(prices, short_period=12, long_period=26, signal_period=9):
-    """Calculates the MACD line and Signal line for the latest price."""
-    if len(prices) < long_period + signal_period:
-        return None, None
-    
-    prices_arr = np.array(prices, dtype=float)
-    
-    # Calculate Short EMA
-    short_ema_values = np.zeros_like(prices_arr, dtype=float)
-    short_ema_values[short_period - 1] = np.mean(prices_arr[:short_period])
-    short_multiplier = 2 / (short_period + 1)
-    for i in range(short_period, len(prices_arr)):
-        short_ema_values[i] = (prices_arr[i] - short_ema_values[i-1]) * short_multiplier + short_ema_values[i-1]
-
-    # Calculate Long EMA
-    long_ema_values = np.zeros_like(prices_arr, dtype=float)
-    long_ema_values[long_period - 1] = np.mean(prices_arr[:long_period])
-    long_multiplier = 2 / (long_period + 1)
-    for i in range(long_period, len(prices_arr)):
-        long_ema_values[i] = (prices_arr[i] - long_ema_values[i-1]) * long_multiplier + long_ema_values[i-1]
-        
-    macd_line_values = short_ema_values - long_ema_values
-    
-    # Calculate Signal Line (EMA of MACD)
-    signal_line_values = np.zeros_like(macd_line_values, dtype=float)
-    macd_for_signal = macd_line_values[long_period-1:]
-    if len(macd_for_signal) < signal_period:
-        return None, None
-        
-    signal_line_values[long_period - 1 + signal_period - 1] = np.mean(macd_for_signal[:signal_period])
-    signal_multiplier = 2 / (signal_period + 1)
-    for i in range(long_period - 1 + signal_period, len(prices_arr)):
-        signal_line_values[i] = (macd_line_values[i] - signal_line_values[i-1]) * signal_multiplier + signal_line_values[i-1]
-
-    return macd_line_values[-1], signal_line_values[-1]
-
-def calculate_rsi(prices, period=14):
+def calculate_rsi(prices, period):
     """Calculates the Relative Strength Index (RSI) for the latest price."""
     if len(prices) < period + 1:
         return None
@@ -78,11 +42,50 @@ def calculate_rsi(prices, period=14):
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
+def calculate_macd(prices, short_period=12, long_period=26, signal_period=9):
+    """
+    Calculates MACD, Signal Line, and Histogram for the latest price.
+    Returns (macd_line, signal_line, macd_histogram)
+    """
+    # Need enough data for the long EMA plus the signal line EMA
+    if len(prices) < long_period + signal_period:
+        return None, None, None
+
+    prices_arr = np.array(prices, dtype=float)
+
+    # Calculate EMAs for the entire series to get accurate recent values
+    # Short EMA
+    ema_short_values = np.zeros_like(prices_arr, dtype=float)
+    multiplier_short = 2 / (short_period + 1)
+    ema_short_values[short_period - 1] = np.mean(prices_arr[:short_period])
+    for i in range(short_period, len(prices_arr)):
+        ema_short_values[i] = (prices_arr[i] - ema_short_values[i-1]) * multiplier_short + ema_short_values[i-1]
+
+    # Long EMA
+    ema_long_values = np.zeros_like(prices_arr, dtype=float)
+    multiplier_long = 2 / (long_period + 1)
+    ema_long_values[long_period - 1] = np.mean(prices_arr[:long_period])
+    for i in range(long_period, len(prices_arr)):
+        ema_long_values[i] = (prices_arr[i] - ema_long_values[i-1]) * multiplier_long + ema_long_values[i-1]
+
+    macd_line_values = ema_short_values - ema_long_values
+
+    # Signal Line (EMA of MACD line)
+    signal_line_values = np.zeros_like(macd_line_values, dtype=float)
+    multiplier_signal = 2 / (signal_period + 1)
+    valid_macd_start_index = long_period - 1
+    signal_line_values[valid_macd_start_index + signal_period - 1] = np.mean(macd_line_values[valid_macd_start_index : valid_macd_start_index + signal_period])
+    for i in range(valid_macd_start_index + signal_period, len(prices_arr)):
+        signal_line_values[i] = (macd_line_values[i] - signal_line_values[i-1]) * multiplier_signal + signal_line_values[i-1]
+
+    macd_histogram_values = macd_line_values - signal_line_values
+
+    return macd_line_values[-1], signal_line_values[-1], macd_histogram_values[-1]
+
 def decide(current_price, price_history, news_context):
     """
-    A self-improved strategy addressing passivity by introducing more responsive
-    exit signals using MACD and price-level breaks, while retaining the proven
-    multi-regime (volatility-based) and multi-factor confirmation logic.
+    A self-improved strategy that addresses passivity by decoupling exit logic from
+    entry logic and incorporates MACD for better momentum analysis.
 
     Parameters:
         current_price (float): The current day's closing price for SPY.
@@ -92,7 +95,7 @@ def decide(current_price, price_history, news_context):
     Returns:
         str: "BUY", "SELL", or "HOLD"
     """
-    # --- 1. Sentiment Analysis (Retained from successful parent) ---
+    # --- 1. Sentiment Analysis (Inherited from successful parent) ---
     context_lower = news_context.lower()
     sentiment_keywords = {
         "fed pivot": 3.0, "rate cut": 2.5, "stimulus": 2.0, "soft landing": 2.0,
@@ -113,19 +116,19 @@ def decide(current_price, price_history, news_context):
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
             net_sentiment_score += -weight if is_negated else weight
 
-    # --- 2. Technical Indicators & Adaptive Regime Detection ---
+    # --- 2. Technical Indicators & Data Preparation ---
     all_prices = price_history + [current_price]
     
     # Define periods
     SHORT_EMA_PERIOD = 12
     LONG_EMA_PERIOD = 26
-    SIGNAL_PERIOD = 9
+    MACD_SIGNAL_PERIOD = 9
     RSI_PERIOD = 14
     VOL_SHORT_PERIOD = 20
     VOL_LONG_PERIOD = 100
 
     # Ensure enough data for all indicators
-    required_history_length = max(LONG_EMA_PERIOD + SIGNAL_PERIOD, RSI_PERIOD + 1, VOL_LONG_PERIOD + 1)
+    required_history_length = max(LONG_EMA_PERIOD + MACD_SIGNAL_PERIOD, VOL_LONG_PERIOD + 1)
     if len(all_prices) < required_history_length:
         return "HOLD"
 
@@ -133,79 +136,52 @@ def decide(current_price, price_history, news_context):
     short_ema = calculate_ema(all_prices, SHORT_EMA_PERIOD)
     long_ema = calculate_ema(all_prices, LONG_EMA_PERIOD)
     rsi = calculate_rsi(all_prices, RSI_PERIOD)
-    macd_line, signal_line = calculate_macd(all_prices, SHORT_EMA_PERIOD, LONG_EMA_PERIOD, SIGNAL_PERIOD)
+    _, _, macd_hist = calculate_macd(all_prices, SHORT_EMA_PERIOD, LONG_EMA_PERIOD, MACD_SIGNAL_PERIOD)
 
-    # Safeguard against None values from calculations
-    if any(v is None for v in [short_ema, long_ema, rsi, macd_line, signal_line]):
+    # Safeguard against None values
+    if any(v is None for v in [short_ema, long_ema, rsi, macd_hist]):
         return "HOLD"
 
-    # Adaptive Volatility Regime (Retained from successful parent)
+    # --- 3. Defensive SELL Logic (Capital Preservation) ---
+    # This logic is checked first to exit positions quickly if conditions sour.
+    # It's more sensitive than the logic for initiating a new short position.
+    is_bearish_trend_cross = short_ema < long_ema
+    is_momentum_collapsing = macd_hist < -0.05 * (current_price / 100) # Dynamic threshold
+    is_catastrophic_news = net_sentiment_score <= -3.0
+
+    if is_bearish_trend_cross or is_momentum_collapsing or is_catastrophic_news:
+        return "SELL"
+
+    # --- 4. Regime Detection & Offensive BUY/SELL Logic ---
     log_returns = np.log(np.array(all_prices)[1:] / np.array(all_prices)[:-1])
     short_term_vol = np.std(log_returns[-VOL_SHORT_PERIOD:])
     long_term_vol = np.std(log_returns[-VOL_LONG_PERIOD:])
     is_high_volatility = (short_term_vol > long_term_vol * 1.5) and (short_term_vol > 0.015)
 
-    # --- 3. Improved Multi-Regime Decision Logic with Faster Exits ---
-    
-    # Define technical state
-    bullish_trend = short_ema > long_ema
-    bullish_momentum = macd_line > signal_line
-    price_above_support = current_price > long_ema
+    is_bullish_trend = short_ema > long_ema
+    is_bullish_momentum = macd_hist > 0
 
-    # --- BUY Conditions (Entry Logic) ---
-    # Conditions to enter a new long position
-    buy_signal = False
     if is_high_volatility:
-        # CRISIS MODE: Stricter entry
-        if (bullish_trend and bullish_momentum and price_above_support and
-            net_sentiment_score >= 2.0 and rsi < 65):
-            buy_signal = True
+        # === CRISIS MODE: High-conviction entries only ===
+        if is_bullish_trend and is_bullish_momentum and net_sentiment_score >= 2.0 and rsi < 65:
+            return "BUY"
     else:
-        # NORMAL MODE: Standard entry
+        # === NORMAL MODE: Adaptive strategy ===
         trend_strength = abs(short_ema - long_ema) / long_ema
         is_choppy_market = trend_strength < 0.005
 
-        if not is_choppy_market: # Normal Trending
-            if (bullish_trend and bullish_momentum and
-                net_sentiment_score >= 1.0 and rsi < 70):
-                buy_signal = True
-        else: # Choppy / Mean-Reversion
+        if not is_choppy_market:
+            # Sub-Regime: Normal Trending Market
+            if is_bullish_trend and is_bullish_momentum and net_sentiment_score >= 1.0 and rsi < 70:
+                return "BUY"
+        else:
+            # Sub-Regime: Choppy / Ranging Market (Mean-Reversion)
             if rsi < 25 and net_sentiment_score > -1.5:
-                buy_signal = True
+                return "BUY"
+            # In choppy markets, we use the primary defensive SELL for exits, but won't initiate new shorts.
+            # We can add a specific mean-reversion sell for profit-taking if desired.
+            elif rsi > 75 and net_sentiment_score < 1.5:
+                return "SELL"
 
-    # --- SELL Conditions (Crucial Improvement: Proactive Exit Logic) ---
-    # Conditions to exit an existing long position
-    sell_signal = False
-    
-    # A) Strong reversal signal (original logic, but now with MACD)
-    strong_reversal = (not bullish_trend and not bullish_momentum and net_sentiment_score <= -1.0)
-    
-    # B) Protective Stop: Trend weakness detected (NEW, FASTER EXIT)
-    # Exit if momentum dies OR price breaks key support
-    trend_weakness = (not bullish_momentum or not price_above_support)
-    
-    # C) Extreme Overbought/Euphoria signal
-    extreme_overbought = rsi > 78 and net_sentiment_score < 1.5
-    
-    # D) Panic Sell on catastrophic news
-    panic_news = net_sentiment_score <= -3.0
-
-    if is_high_volatility:
-        # In crisis, exit faster. Any sign of weakness is a sell.
-        if strong_reversal or trend_weakness or panic_news:
-            sell_signal = True
-    else: # Normal Mode
-        # In normal markets, allow for more breathing room but still exit on clear weakness.
-        if strong_reversal or panic_news or extreme_overbought:
-            sell_signal = True
-        # In a trending market, use trend_weakness as a primary exit signal.
-        elif not (trend_strength < 0.005) and trend_weakness:
-            sell_signal = True
-
-    # --- Final Decision ---
-    if buy_signal:
-        return "BUY"
-    elif sell_signal:
-        return "SELL"
-    else:
-        return "HOLD"
+    # Default action is to hold.
+    return "HOLD"
