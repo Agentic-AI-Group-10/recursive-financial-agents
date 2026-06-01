@@ -10,6 +10,10 @@ def calculate_ema(prices, period):
     prices_arr = np.array(prices, dtype=float)
     
     # Initialize EMA with SMA for the first 'period' values
+    # Ensure there are enough prices for the initial SMA
+    if len(prices_arr) < period:
+        return None
+    
     ema_values = np.zeros_like(prices_arr, dtype=float)
     ema_values[period - 1] = np.mean(prices_arr[:period])
     
@@ -34,6 +38,10 @@ def calculate_rsi(prices, period):
     losses = np.where(deltas < 0, -deltas, 0) # Make losses positive
     
     # Calculate initial average gain and loss
+    # Ensure there are enough deltas for the initial period
+    if len(gains) < period:
+        return None
+
     avg_gain = np.mean(gains[:period])
     avg_loss = np.mean(losses[:period])
     
@@ -145,8 +153,9 @@ def decide(current_price, price_history, news_context):
     # --- 3. Refined Decision Logic ---
     
     # Define thresholds for sentiment and RSI
-    BULLISH_SENTIMENT_THRESHOLD = 2.5 # Requires a stronger positive news signal
-    BEARISH_SENTIMENT_THRESHOLD = -2.5 # Requires a stronger negative news signal
+    # RELAXED SENTIMENT THRESHOLDS to increase trade frequency
+    BULLISH_SENTIMENT_THRESHOLD = 1.0 
+    BEARISH_SENTIMENT_THRESHOLD = -1.0 
     RSI_OVERBOUGHT = 70
     RSI_OVERSOLD = 30
     
@@ -154,27 +163,30 @@ def decide(current_price, price_history, news_context):
     bullish_tech_signal = False
     bearish_tech_signal = False
     
-    # EMA Crossover and Price Position Confirmation
-    # Bullish: Short EMA above Long EMA AND current price above Short EMA
-    if short_ema > long_ema and current_price > short_ema:
+    # EMA Crossover (Simplified: Removed current_price confirmation for less lag and more activity)
+    # Bullish: Short EMA above Long EMA
+    if short_ema > long_ema:
         bullish_tech_signal = True
-    # Bearish: Short EMA below Long EMA AND current price below Short EMA
-    elif short_ema < long_ema and current_price < short_ema:
+    # Bearish: Short EMA below Long EMA
+    elif short_ema < long_ema:
         bearish_tech_signal = True
         
     # RSI as a filter: Prevent buying into overbought conditions or selling into oversold conditions
+    # This filter remains crucial for risk management.
     if bullish_tech_signal and rsi >= RSI_OVERBOUGHT:
         bullish_tech_signal = False # Overbought, do not buy
     if bearish_tech_signal and rsi <= RSI_OVERSOLD:
         bearish_tech_signal = False # Oversold, do not sell
         
     # Combine all signals for final decision
+    # The AND logic is retained, but individual conditions are less strict,
+    # aiming for more frequent, yet still confirmed, trades.
     
-    # BUY condition: Strong bullish sentiment AND strong confirmed technicals
+    # BUY condition: Moderately bullish sentiment AND confirmed bullish technicals (EMA crossover, not overbought)
     if net_sentiment_score >= BULLISH_SENTIMENT_THRESHOLD and bullish_tech_signal:
         return "BUY"
     
-    # SELL condition: Strong bearish sentiment AND strong confirmed technicals
+    # SELL condition: Moderately bearish sentiment AND confirmed bearish technicals (EMA crossover, not oversold)
     elif net_sentiment_score <= BEARISH_SENTIMENT_THRESHOLD and bearish_tech_signal:
         return "SELL"
     
