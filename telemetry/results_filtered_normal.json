@@ -1,0 +1,430 @@
+{
+    "regime": "Backtest",
+    "metrics": {
+        "initial_portfolio_value": 10000.0,
+        "final_portfolio_value": 9676.97,
+        "total_return_pct": -3.2303,
+        "benchmark_return_pct": 14.2622,
+        "alpha_vs_benchmark": -17.4925,
+        "max_drawdown_pct": -4.6907,
+        "sharpe_ratio_annualized": -0.4545,
+        "win_rate_pct": 45.45,
+        "total_trades_executed": 44,
+        "total_closed_trades": 22
+    },
+    "telemetry": {
+        "elapsed_execution_seconds": 0.0241,
+        "total_energy_joules": 1.57,
+        "measured_via_hardware_sensors": false,
+        "input_tokens_consumed": 0,
+        "output_tokens_consumed": 0,
+        "total_llm_calls": 0,
+        "calculated_costs": {
+            "token_cost_usd": 0.0,
+            "energy_cost_usd": 0.0,
+            "total_compute_cost_usd": 0.0
+        }
+    },
+    "scores": {
+        "net_profit_loss_usd": -323.03,
+        "efficiency_score_aroi": -3230300.9364
+    },
+    "trade_log": [
+        {
+            "date": "2017-01-24",
+            "action": "BUY",
+            "price": 196.5055,
+            "fee": 5.0,
+            "cash": 0.0,
+            "shares": 50.8637,
+            "portfolio_value": 9995.0
+        },
+        {
+            "date": "2017-01-27",
+            "action": "SELL",
+            "price": 197.6883,
+            "fee": 5.0276,
+            "cash": 10050.13,
+            "shares": 0.0,
+            "portfolio_value": 10050.13
+        },
+        {
+            "date": "2017-02-06",
+            "action": "BUY",
+            "price": 197.6537,
+            "fee": 5.0251,
+            "cash": 0.0,
+            "shares": 50.8217,
+            "portfolio_value": 10045.11
+        },
+        {
+            "date": "2017-02-10",
+            "action": "SELL",
+            "price": 199.8812,
+            "fee": 5.0792,
+            "cash": 10153.23,
+            "shares": 0.0,
+            "portfolio_value": 10153.23
+        },
+        {
+            "date": "2017-02-27",
+            "action": "BUY",
+            "price": 204.7161,
+            "fee": 5.0766,
+            "cash": 0.0,
+            "shares": 49.5718,
+            "portfolio_value": 10148.16
+        },
+        {
+            "date": "2017-02-28",
+            "action": "SELL",
+            "price": 204.1636,
+            "fee": 5.0604,
+            "cash": 10115.71,
+            "shares": 0.0,
+            "portfolio_value": 10115.71
+        },
+        {
+            "date": "2017-03-10",
+            "action": "BUY",
+            "price": 205.2169,
+            "fee": 5.0579,
+            "cash": 0.0,
+            "shares": 49.2681,
+            "portfolio_value": 10110.65
+        },
+        {
+            "date": "2017-03-14",
+            "action": "SELL",
+            "price": 204.5349,
+            "fee": 5.0385,
+            "cash": 10072.01,
+            "shares": 0.0,
+            "portfolio_value": 10072.01
+        },
+        {
+            "date": "2017-05-05",
+            "action": "BUY",
+            "price": 207.8526,
+            "fee": 5.036,
+            "cash": 0.0,
+            "shares": 48.4332,
+            "portfolio_value": 10066.97
+        },
+        {
+            "date": "2017-05-11",
+            "action": "SELL",
+            "price": 207.5752,
+            "fee": 5.0268,
+            "cash": 10048.5,
+            "shares": 0.0,
+            "portfolio_value": 10048.5
+        },
+        {
+            "date": "2017-06-07",
+            "action": "BUY",
+            "price": 211.2866,
+            "fee": 5.0243,
+            "cash": 0.0,
+            "shares": 47.5349,
+            "portfolio_value": 10043.48
+        },
+        {
+            "date": "2017-06-09",
+            "action": "SELL",
+            "price": 211.0697,
+            "fee": 5.0166,
+            "cash": 10028.16,
+            "shares": 0.0,
+            "portfolio_value": 10028.16
+        },
+        {
+            "date": "2017-06-13",
+            "action": "BUY",
+            "price": 212.0583,
+            "fee": 5.0141,
+            "cash": 0.0,
+            "shares": 47.266,
+            "portfolio_value": 10023.14
+        },
+        {
+            "date": "2017-06-15",
+            "action": "SELL",
+            "price": 211.3819,
+            "fee": 4.9956,
+            "cash": 9986.18,
+            "shares": 0.0,
+            "portfolio_value": 9986.18
+        },
+        {
+            "date": "2017-07-12",
+            "action": "BUY",
+            "price": 212.6219,
+            "fee": 4.9931,
+            "cash": 0.0,
+            "shares": 46.9434,
+            "portfolio_value": 9981.18
+        },
+        {
+            "date": "2017-07-13",
+            "action": "SELL",
+            "price": 212.9791,
+            "fee": 4.999,
+            "cash": 9992.96,
+            "shares": 0.0,
+            "portfolio_value": 9992.96
+        },
+        {
+            "date": "2017-08-15",
+            "action": "BUY",
+            "price": 214.8003,
+            "fee": 4.9965,
+            "cash": 0.0,
+            "shares": 46.4988,
+            "portfolio_value": 9987.96
+        },
+        {
+            "date": "2017-08-17",
+            "action": "SELL",
+            "price": 211.8202,
+            "fee": 4.9247,
+            "cash": 9844.46,
+            "shares": 0.0,
+            "portfolio_value": 9844.46
+        },
+        {
+            "date": "2017-08-25",
+            "action": "BUY",
+            "price": 213.1011,
+            "fee": 4.9222,
+            "cash": 0.0,
+            "shares": 46.1731,
+            "portfolio_value": 9839.54
+        },
+        {
+            "date": "2017-08-29",
+            "action": "SELL",
+            "price": 213.3539,
+            "fee": 4.9256,
+            "cash": 9846.29,
+            "shares": 0.0,
+            "portfolio_value": 9846.29
+        },
+        {
+            "date": "2017-09-06",
+            "action": "BUY",
+            "price": 215.1401,
+            "fee": 4.9231,
+            "cash": 0.0,
+            "shares": 45.744,
+            "portfolio_value": 9841.36
+        },
+        {
+            "date": "2017-09-07",
+            "action": "SELL",
+            "price": 215.114,
+            "fee": 4.9201,
+            "cash": 9835.25,
+            "shares": 0.0,
+            "portfolio_value": 9835.25
+        },
+        {
+            "date": "2017-11-16",
+            "action": "BUY",
+            "price": 226.4709,
+            "fee": 4.9176,
+            "cash": 0.0,
+            "shares": 43.4066,
+            "portfolio_value": 9830.33
+        },
+        {
+            "date": "2017-11-17",
+            "action": "SELL",
+            "price": 225.8053,
+            "fee": 4.9007,
+            "cash": 9796.54,
+            "shares": 0.0,
+            "portfolio_value": 9796.54
+        },
+        {
+            "date": "2017-11-24",
+            "action": "BUY",
+            "price": 227.9946,
+            "fee": 4.8983,
+            "cash": 0.0,
+            "shares": 42.9468,
+            "portfolio_value": 9791.64
+        },
+        {
+            "date": "2017-11-28",
+            "action": "SELL",
+            "price": 230.1926,
+            "fee": 4.943,
+            "cash": 9881.1,
+            "shares": 0.0,
+            "portfolio_value": 9881.1
+        },
+        {
+            "date": "2017-11-29",
+            "action": "BUY",
+            "price": 230.0524,
+            "fee": 4.9405,
+            "cash": 0.0,
+            "shares": 42.93,
+            "portfolio_value": 9876.16
+        },
+        {
+            "date": "2017-11-30",
+            "action": "SELL",
+            "price": 232.0665,
+            "fee": 4.9813,
+            "cash": 9957.64,
+            "shares": 0.0,
+            "portfolio_value": 9957.64
+        },
+        {
+            "date": "2018-01-18",
+            "action": "BUY",
+            "price": 245.6896,
+            "fee": 4.9788,
+            "cash": 0.0,
+            "shares": 40.5091,
+            "portfolio_value": 9952.66
+        },
+        {
+            "date": "2018-01-22",
+            "action": "SELL",
+            "price": 248.8141,
+            "fee": 5.0396,
+            "cash": 10074.2,
+            "shares": 0.0,
+            "portfolio_value": 10074.2
+        },
+        {
+            "date": "2018-05-14",
+            "action": "BUY",
+            "price": 241.23,
+            "fee": 5.0371,
+            "cash": 0.0,
+            "shares": 41.7409,
+            "portfolio_value": 10069.16
+        },
+        {
+            "date": "2018-05-15",
+            "action": "SELL",
+            "price": 239.5687,
+            "fee": 4.9999,
+            "cash": 9994.82,
+            "shares": 0.0,
+            "portfolio_value": 9994.82
+        },
+        {
+            "date": "2018-07-16",
+            "action": "BUY",
+            "price": 247.9587,
+            "fee": 4.9974,
+            "cash": 0.0,
+            "shares": 40.2882,
+            "portfolio_value": 9989.82
+        },
+        {
+            "date": "2018-07-17",
+            "action": "SELL",
+            "price": 248.9618,
+            "fee": 5.0151,
+            "cash": 10025.22,
+            "shares": 0.0,
+            "portfolio_value": 10025.22
+        },
+        {
+            "date": "2018-08-17",
+            "action": "BUY",
+            "price": 253.0361,
+            "fee": 5.0126,
+            "cash": 0.0,
+            "shares": 39.5999,
+            "portfolio_value": 10020.2
+        },
+        {
+            "date": "2018-08-21",
+            "action": "SELL",
+            "price": 254.1723,
+            "fee": 5.0326,
+            "cash": 10060.17,
+            "shares": 0.0,
+            "portfolio_value": 10060.17
+        },
+        {
+            "date": "2018-08-23",
+            "action": "BUY",
+            "price": 253.6841,
+            "fee": 5.0301,
+            "cash": 0.0,
+            "shares": 39.6364,
+            "portfolio_value": 10055.14
+        },
+        {
+            "date": "2018-08-24",
+            "action": "SELL",
+            "price": 255.2108,
+            "fee": 5.0578,
+            "cash": 10110.59,
+            "shares": 0.0,
+            "portfolio_value": 10110.59
+        },
+        {
+            "date": "2018-11-09",
+            "action": "BUY",
+            "price": 247.6723,
+            "fee": 5.0553,
+            "cash": 0.0,
+            "shares": 40.802,
+            "portfolio_value": 10105.53
+        },
+        {
+            "date": "2018-11-12",
+            "action": "SELL",
+            "price": 243.0445,
+            "fee": 4.9584,
+            "cash": 9911.75,
+            "shares": 0.0,
+            "portfolio_value": 9911.75
+        },
+        {
+            "date": "2018-11-28",
+            "action": "BUY",
+            "price": 244.8367,
+            "fee": 4.9559,
+            "cash": 0.0,
+            "shares": 40.4629,
+            "portfolio_value": 9906.8
+        },
+        {
+            "date": "2018-11-29",
+            "action": "SELL",
+            "price": 244.3018,
+            "fee": 4.9426,
+            "cash": 9880.21,
+            "shares": 0.0,
+            "portfolio_value": 9880.21
+        },
+        {
+            "date": "2018-11-30",
+            "action": "BUY",
+            "price": 245.7908,
+            "fee": 4.9401,
+            "cash": 0.0,
+            "shares": 40.1775,
+            "portfolio_value": 9875.27
+        },
+        {
+            "date": "2018-12-04",
+            "action": "SELL",
+            "price": 240.9757,
+            "fee": 4.8409,
+            "cash": 9676.97,
+            "shares": 0.0,
+            "portfolio_value": 9676.97
+        }
+    ]
+}

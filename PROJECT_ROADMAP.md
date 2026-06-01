@@ -33,7 +33,8 @@
     *   **Data Signal Density:** Compare the performance delta between Filtered and Unfiltered contexts to see if noise filtering speeds up self-improvement.
 
 ## Phase 3: Supercloud Preparation (The Foundry)
-*   [ ] **Stage Historical Data:** Upload both simulation pack CSVs to Supercloud `/data`.
+*   [x] **Build Backtesting Engine:** Implement the core daily simulation engine with point-in-time left-join compliance, transactional fees, full P&L metrics, and hardware/token telemetry tracking (`backtest_engine.py`).
+*   [ ] **Stage Historical Data:** Upload all four simulation pack CSVs to Supercloud `/data`.
 *   [ ] **Verify Local LLM:** Identify the path for Llama-3/Mistral on the Supercloud.
 *   [ ] **Finalize Engine:** Upload `backtest_engine.py` and `submit_job.sh` to Supercloud.
 
