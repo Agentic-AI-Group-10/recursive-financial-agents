@@ -23,7 +23,9 @@ The project operates across four distinct environments:
 *   **Domain:** Quantitative Trading of a single ticker ($SPY).
 *   **Strategy Interface:** The "Worker Agent" only writes the `decide()` function within a fixed `strategy_logic.py` file.
 *   **The Meta-Loop:** The system will run for **100 generations or 6 hours**, whichever comes first.
-*   **Dual-Dataset Comparative Trial:** The system runs comparative benchmarks on a high-signal filtered dataset (`simulation_pack_filtered.csv`) versus a full unfiltered dataset (`simulation_pack_unfiltered.csv` with a 100 headline-per-bar cap) to measure signal-to-noise impact on agentic self-improvement.
+*   **Multi-Regime Validation & Dual-Dataset Comparative Trial:** To guarantee strategy robustness, our experiment operates across two distinct market regimes and two data densities:
+    *   **In-Sample Training Regime (2017–2018 "Normal News Cycle"):** We run the recursive optimization loop under stable market conditions. We compare learning curves and agentic efficiency on a high-signal filtered set (`simulation_pack_filtered_normal.csv`) vs. a full unfiltered set (`simulation_pack_unfiltered_normal.csv` with a 100-headline safety cap).
+    *   **Out-of-Sample Stress-Testing Regime (2019–2020 "Covid Black Swan"):** We take the best-evolved agents and evaluate them on highly volatile crash data (`simulation_pack_filtered.csv` and `simulation_pack_unfiltered.csv`) without further training to measure real-world generalized trading robustness.
 *   **Safety & Review:** Antigravity is instructed to **automatically open Pull Requests (PRs)**. Humans must review and approve these PRs.
 *   **Budgeting:**
     *   **$50 Startup Fund:** Allocated for Gemini AI API tokens and energy estimation costs.

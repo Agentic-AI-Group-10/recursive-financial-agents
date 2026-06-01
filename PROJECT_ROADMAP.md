@@ -13,23 +13,24 @@
 *   [ ] **Setup Antigravity "Bridge":** Configure SSH keys so Antigravity can talk to the GCP VM (for DB/Logs) and MIT Supercloud (for execution).
 *   [ ] **Environment Variables:** Create a `.env` file locally to store Project IDs and API Keys safely.
 
-## Phase 2.5: Data Engineering (Dual-Dataset Simulation Packs)
+## Phase 2.5: Data Engineering (Multi-Regime Simulation Packs)
 *   [x] **Acquire Datasets:** Download $SPY price data and Kaggle "Daily Financial News" locally.
 *   [x] **Build the Joiner:** Write a temporal point-in-time left-joiner with look-ahead guards and timezone normalization (`build_simulation_pack.py`).
-*   [x] **Dual Simulation Pack Generation:**
-    *   [x] **High-Signal Filtered Pack:** Generate `simulation_pack_filtered.csv` (macro-economic keywords + S&P 500 mega-caps).
-    *   [x] **Full Unfiltered Pack:** Generate `simulation_pack_unfiltered.csv` (all headlines, with a 100 headline-per-bar safety cap).
-*   [ ] **Deploy to Foundry:** Upload both simulation packs to the MIT Supercloud `/data` directory.
+*   [x] **Dual Simulation Pack Generation (Normal Regime - 2017-2018):**
+    *   [x] **High-Signal Filtered Pack:** Generate `simulation_pack_filtered_normal.csv` (macro-keywords + mega-caps).
+    *   [x] **Full Unfiltered Pack:** Generate `simulation_pack_unfiltered_normal.csv` (all headlines, 100 safety cap).
+*   [x] **Dual Simulation Pack Generation (Stress Test / Black Swan - 2019-2020):**
+    *   [x] **High-Signal Filtered Pack:** Generate `simulation_pack_filtered.csv` (macro-keywords + mega-caps).
+    *   [x] **Full Unfiltered Pack:** Generate `simulation_pack_unfiltered.csv` (all headlines, 100 safety cap).
+*   [ ] **Deploy to Foundry:** Upload all four simulation packs to the MIT Supercloud `/data` directory.
 
-## Phase 2.6: Experimental Design (Filtered vs. Unfiltered Trials)
-*   [ ] **Comparative Test Matrix:** Define the trial configurations for both datasets.
-*   [ ] **Trial A (High-Signal Benchmark):** Run the self-improving agents on the `simulation_pack_filtered.csv` dataset.
-*   [ ] **Trial B (Full Context Benchmark):** Run the same agents on the `simulation_pack_unfiltered.csv` dataset.
-*   [ ] **Comparative Performance Metrics:** Formulate the final analysis comparing:
-    *   **Monetary Return:** Returns, Sharpe Ratio, Maximum Drawdown.
-    *   **Context Efficiency:** Average tokens consumed per trading decision.
-    *   **Agentic ROI (AROI):** Net return of the strategy minus AI token & energy costs.
-    *   **Inference Latency:** Iteration speed (seconds per decision).
+## Phase 2.6: Experimental Design (Multi-Regime Filtered vs. Unfiltered)
+*   [ ] **In-Sample Training Trials (Normal Cycle - 2017–2018):** Run recursive self-improvement loops on both the normal filtered and normal unfiltered datasets to evolve strategies under stable conditions.
+*   [ ] **Out-of-Sample Stress-Testing (Covid Black Swan - 2019–2020):** Evaluate the best-evolved strategies directly on the highly volatile 2019-2020 crash without further optimization to check regime adaptability.
+*   [ ] **Comparative Performance Metrics:** Compare across regimes and datasets:
+    *   **Monetary Return:** Cumulative return, Sharpe Ratio, Maximum Drawdown.
+    *   **Inference Costs & AROI:** Calculate Net AROI: Net Return % - AI Token & Energy Costs.
+    *   **Data Signal Density:** Compare the performance delta between Filtered and Unfiltered contexts to see if noise filtering speeds up self-improvement.
 
 ## Phase 3: Supercloud Preparation (The Foundry)
 *   [ ] **Stage Historical Data:** Upload both simulation pack CSVs to Supercloud `/data`.
