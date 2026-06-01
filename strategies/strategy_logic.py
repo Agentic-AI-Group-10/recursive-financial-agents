@@ -29,7 +29,9 @@ def calculate_ema(prices, period):
     return ema_s[-1] if len(ema_s) > 0 else None
 
 def calculate_rsi(prices, period=14):
-    """Calculates the Relative Strength Index (RSI) using Wilder's smoothing method."""
+    """
+    Calculates the Relative Strength Index (RSI) using Wilder's smoothing method.
+    """
     if len(prices) < period + 1:
         return None
     
@@ -91,42 +93,10 @@ def calculate_bollinger_bands(prices, period=20, num_std_dev=2):
     
     return middle_band, upper_band, lower_band
 
-def calculate_adx(highs, lows, closes, period=14):
-    """Calculates the Average Directional Index (ADX).
-    Note: This is a simplified implementation using only closing prices for highs/lows.
-    """
-    if len(closes) < 2 * period:
-        return None
-
-    prices = np.array(closes)
-    up_moves = np.diff(prices)
-    down_moves = -up_moves
-
-    plus_dm = np.where((up_moves > down_moves) & (up_moves > 0), up_moves, 0)
-    minus_dm = np.where((down_moves > up_moves) & (down_moves > 0), down_moves, 0)
-
-    tr1 = np.abs(np.roll(prices, -1) - np.roll(prices, 0))[:-1] # High - Low (simplified)
-    tr2 = np.abs(np.roll(prices, -1) - np.roll(prices, -2))[:-1] # High - Prev Close
-    tr3 = np.abs(np.roll(prices, 0) - np.roll(prices, -2))[:-1] # Low - Prev Close
-    true_range = np.maximum.reduce([tr1, tr2, tr3])
-
-    atr = np.zeros(len(closes) - period)
-    atr[0] = np.mean(true_range[:period])
-    for i in range(1, len(atr)):
-        atr[i] = (atr[i-1] * (period - 1) + true_range[i + period - 1]) / period
-
-    plus_di = 100 * calculate_ema_series(plus_dm, period) / atr
-    minus_di = 100 * calculate_ema_series(minus_dm, period) / atr
-
-    dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di)
-    adx_series = calculate_ema_series(dx, period)
-
-    return adx_series[-1] if len(adx_series) > 0 else None
-
 def decide(current_price, price_history, news_context):
     """
-    A self-improved, multi-regime trading strategy featuring ADX for trend
-    identification and a faster protective exit mechanism to reduce drawdowns.
+    A self-improved strategy that introduces a universal exit rule to mitigate
+    drawdowns and simplifies its normal-regime logic for more robust entries.
 
     Parameters:
         current_price (float): The current day's closing price for SPY.
@@ -161,7 +131,7 @@ def decide(current_price, price_history, news_context):
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
             net_sentiment_score += -weight if is_negated else weight
 
-    # --- 2. Technical Indicators & Improved Regime Detection ---
+    # --- 2. Technical Indicators & Regime Detection ---
     all_prices = price_history + [current_price]
     
     # Define periods
@@ -169,82 +139,61 @@ def decide(current_price, price_history, news_context):
     LONG_EMA_PERIOD = 26
     MACD_SIGNAL_PERIOD = 9
     RSI_PERIOD = 14
-    ADX_PERIOD = 14
     BB_PERIOD = 20
-    MEDIUM_TERM_SMA_PERIOD = 50
-    LONG_TERM_SMA_PERIOD = 200
+    LONG_TERM_SMA_PERIOD = 100 # For overall trend filtering
     VOL_SHORT_PERIOD = 20
     VOL_LONG_PERIOD = 100
 
-    required_history_length = max(LONG_TERM_SMA_PERIOD, VOL_LONG_PERIOD + 1, 2 * ADX_PERIOD)
+    required_history_length = max(LONG_EMA_PERIOD + MACD_SIGNAL_PERIOD, VOL_LONG_PERIOD + 1, LONG_TERM_SMA_PERIOD)
     if len(all_prices) < required_history_length:
         return "HOLD"
 
-    # Calculate core indicators
+    # Calculate all indicators
     short_ema = calculate_ema(all_prices, SHORT_EMA_PERIOD)
     long_ema = calculate_ema(all_prices, LONG_EMA_PERIOD)
     rsi = calculate_rsi(all_prices, RSI_PERIOD)
     macd_histogram = calculate_macd(all_prices, SHORT_EMA_PERIOD, LONG_EMA_PERIOD, MACD_SIGNAL_PERIOD)
     _, upper_band, lower_band = calculate_bollinger_bands(all_prices, BB_PERIOD)
-    medium_sma = calculate_sma(all_prices, MEDIUM_TERM_SMA_PERIOD)
-    long_sma = calculate_sma(all_prices, LONG_TERM_SMA_PERIOD)
-    adx = calculate_adx(all_prices, all_prices, all_prices, ADX_PERIOD)
+    long_term_sma = calculate_sma(all_prices, LONG_TERM_SMA_PERIOD)
 
-    if any(v is None for v in [short_ema, long_ema, rsi, macd_histogram, upper_band, medium_sma, long_sma, adx]):
+    if any(v is None for v in [short_ema, long_ema, rsi, macd_histogram, upper_band, long_term_sma]):
         return "HOLD"
 
-    # Volatility Regime
+    # Volatility Regime Detection
     log_returns = np.log(np.array(all_prices)[1:] / np.array(all_prices)[:-1])
     short_term_vol = np.std(log_returns[-VOL_SHORT_PERIOD:])
     long_term_vol = np.std(log_returns[-VOL_LONG_PERIOD:])
     is_high_volatility = (short_term_vol > long_term_vol * 1.5) and (short_term_vol > 0.015)
 
-    # --- 3. Multi-Regime Decision Logic ---
-    
-    # Protective Sell Signal: A faster exit to reduce drawdowns, applicable in most regimes.
-    if current_price < medium_sma and macd_histogram < 0:
+    # --- 3. Universal Exit Logic (Risk Management First) ---
+    # This rule is designed to exit long positions to prevent large drawdowns.
+    # It triggers if the price breaks below the medium-term trend (26-day EMA)
+    # and momentum has turned negative.
+    if current_price < long_ema and macd_histogram < 0:
         return "SELL"
 
+    # --- 4. Regime-Based Entry & Action Logic ---
     if is_high_volatility:
-        # === CRISIS MODE: High-conviction trend-following (proven effective) ===
-        BULLISH_SENTIMENT_THRESHOLD = 2.5
-        BEARISH_SENTIMENT_THRESHOLD = -2.5
-        
-        bullish_trend = short_ema > long_ema
-        bearish_trend = short_ema < long_ema
-        
-        if net_sentiment_score >= BULLISH_SENTIMENT_THRESHOLD and bullish_trend and macd_histogram > 0 and rsi < 70:
-            return "BUY"
-        elif net_sentiment_score <= BEARISH_SENTIMENT_THRESHOLD and bearish_trend and macd_histogram < 0 and rsi > 30:
+        # === CRISIS MODE: High-conviction trend-following ===
+        # Aggressive SELL signal (for entering short or liquidating in a panic)
+        if net_sentiment_score <= -2.5 and short_ema < long_ema and macd_histogram < 0 and rsi > 35:
             return "SELL"
+        # High-conviction BUY signal
+        if net_sentiment_score >= 2.5 and short_ema > long_ema and macd_histogram > 0 and rsi < 65:
+            return "BUY"
     else:
-        # === NORMAL MODE: ADX-based logic (Trending vs. Ranging) ===
-        is_trending = adx > 25
-
-        if is_trending:
-            # Sub-Regime: Normal Trending Market
-            BULLISH_SENTIMENT_THRESHOLD = 1.0
-            BEARISH_SENTIMENT_THRESHOLD = -1.0
-            
-            bullish_trend = short_ema > long_ema
-            bearish_trend = short_ema < long_ema
-
-            if net_sentiment_score >= BULLISH_SENTIMENT_THRESHOLD and bullish_trend and macd_histogram > 0 and rsi < 75:
+        # === NORMAL MODE: Simplified, trend-filtered entries ===
+        is_long_term_uptrend = current_price > long_term_sma
+        
+        # Only consider buying if the long-term market health is positive
+        if is_long_term_uptrend:
+            # A) Momentum Entry: Buy into established, accelerating trends.
+            if short_ema > long_ema and macd_histogram > 0 and net_sentiment_score >= 1.0:
                 return "BUY"
-            elif net_sentiment_score <= BEARISH_SENTIMENT_THRESHOLD and bearish_trend and macd_histogram < 0 and rsi > 25:
-                return "SELL"
-        else:
-            # Sub-Regime: Ranging Market (Safer Mean-Reversion)
-            MEAN_REVERSION_RSI_OVERSOLD = 30
-            MEAN_REVERSION_RSI_OVERBOUGHT = 70
             
-            # Buy the dip ONLY if the long-term trend is still bullish (price > 200-day SMA)
-            if (rsi < MEAN_REVERSION_RSI_OVERSOLD and current_price < lower_band) and \
-               (net_sentiment_score > -1.0) and (current_price > long_sma):
+            # B) Dip-Buying Entry: Safer mean-reversion within a primary uptrend.
+            if rsi < 35 and current_price < lower_band and net_sentiment_score > -1.5:
                 return "BUY"
-            # Sell the rip (profit-taking or reversal signal)
-            elif (rsi > MEAN_REVERSION_RSI_OVERBOUGHT and current_price > upper_band) and \
-                 (net_sentiment_score < 1.0):
-                return "SELL"
 
+    # --- 5. Default Action ---
     return "HOLD"
