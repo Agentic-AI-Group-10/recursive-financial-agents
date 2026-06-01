@@ -61,23 +61,24 @@ def calculate_rsi(prices, period=14):
 def calculate_macd(prices, short_period=12, long_period=26, signal_period=9):
     """Calculates the MACD histogram for the latest price."""
     if len(prices) < long_period + signal_period:
-        return None
+        return None, None
 
     short_ema_series = calculate_ema_series(prices, short_period)
     long_ema_series = calculate_ema_series(prices, long_period)
     
-    macd_line = short_ema_series[len(short_ema_series)-len(long_ema_series):] - long_ema_series
+    macd_line_series = short_ema_series[len(short_ema_series)-len(long_ema_series):] - long_ema_series
     
-    if len(macd_line) < signal_period:
-        return None
+    if len(macd_line_series) < signal_period:
+        return None, None
         
-    signal_line_series = calculate_ema_series(macd_line, signal_period)
+    signal_line_series = calculate_ema_series(macd_line_series, signal_period)
     
     if len(signal_line_series) == 0:
-        return None
+        return None, None
         
-    histogram = macd_line[-1] - signal_line_series[-1]
-    return histogram
+    macd_line = macd_line_series[-1]
+    histogram = macd_line - signal_line_series[-1]
+    return macd_line, histogram
 
 def calculate_bollinger_bands(prices, period=20, num_std_dev=2):
     """Calculates the Bollinger Bands for the latest price."""
@@ -95,8 +96,8 @@ def calculate_bollinger_bands(prices, period=20, num_std_dev=2):
 
 def decide(current_price, price_history, news_context):
     """
-    A self-improved strategy that introduces a universal exit rule to mitigate
-    drawdowns and simplifies its normal-regime logic for more robust entries.
+    A self-improved, multi-regime trading strategy using a signal scoring system
+    to increase adaptability and reduce passivity.
 
     Parameters:
         current_price (float): The current day's closing price for SPY.
@@ -106,20 +107,20 @@ def decide(current_price, price_history, news_context):
     Returns:
         str: "BUY", "SELL", or "HOLD"
     """
-    # --- 1. Sentiment Analysis (Unchanged from successful parent) ---
+    # --- 1. Sentiment Analysis with Expanded Keywords ---
     context_lower = news_context.lower()
     sentiment_keywords = {
         "fed pivot": 3.0, "rate cut": 2.5, "stimulus": 2.0, "soft landing": 2.0,
         "dovish": 2.0, "record high": 2.0, "bullish": 2.0, "surge": 2.0,
         "strong earnings": 2.0, "cooling inflation": 1.5, "disinflation": 1.5,
-        "ai boom": 2.0, "technological breakthrough": 2.0, "easing tensions": 1.5,
-        "beat": 1.5, "growth": 1.5, "recovery": 1.5, "upgrade": 1.5, "strong jobs": 2.0,
+        "ai boom": 2.5, "technological breakthrough": 2.0, "easing tensions": 1.5,
+        "beat expectations": 1.5, "growth": 1.5, "recovery": 1.5, "upgrade": 1.5, "strong jobs": 2.0,
         "consumer confidence": 1.5,
         "rate hike": -2.5, "recession": -2.5, "crisis": -2.5, "bankruptcy": -2.5,
         "hard landing": -2.5, "stagflation": -2.5, "hawkish": -2.0, "bearish": -2.0,
-        "plunge": -2.0, "inflation": -2.0, "sell-off": -2.0, "weak earnings": -2.0,
+        "plunge": -2.0, "persistent inflation": -2.5, "sell-off": -2.0, "weak earnings": -2.0,
         "geopolitical risk": -2.0, "market turmoil": -2.0, "credit crunch": -2.5,
-        "tightening": -1.5, "miss": -1.5, "downgrade": -1.5, "tariff": -1.5,
+        "tightening": -1.5, "miss expectations": -1.5, "downgrade": -1.5, "tariff": -1.5,
         "supply chain disruption": -1.5, "uncertainty": -1.5, "weak jobs": -2.0
     }
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids"]
@@ -131,7 +132,7 @@ def decide(current_price, price_history, news_context):
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
             net_sentiment_score += -weight if is_negated else weight
 
-    # --- 2. Technical Indicators & Regime Detection ---
+    # --- 2. Technical Indicators & Adaptive Regime Detection ---
     all_prices = price_history + [current_price]
     
     # Define periods
@@ -140,60 +141,92 @@ def decide(current_price, price_history, news_context):
     MACD_SIGNAL_PERIOD = 9
     RSI_PERIOD = 14
     BB_PERIOD = 20
-    LONG_TERM_SMA_PERIOD = 100 # For overall trend filtering
     VOL_SHORT_PERIOD = 20
     VOL_LONG_PERIOD = 100
+    LONG_TERM_SMA_PERIOD = 200
 
     required_history_length = max(LONG_EMA_PERIOD + MACD_SIGNAL_PERIOD, VOL_LONG_PERIOD + 1, LONG_TERM_SMA_PERIOD)
     if len(all_prices) < required_history_length:
         return "HOLD"
 
-    # Calculate all indicators
+    # Calculate core indicators
     short_ema = calculate_ema(all_prices, SHORT_EMA_PERIOD)
     long_ema = calculate_ema(all_prices, LONG_EMA_PERIOD)
     rsi = calculate_rsi(all_prices, RSI_PERIOD)
-    macd_histogram = calculate_macd(all_prices, SHORT_EMA_PERIOD, LONG_EMA_PERIOD, MACD_SIGNAL_PERIOD)
+    macd_line, macd_histogram = calculate_macd(all_prices, SHORT_EMA_PERIOD, LONG_EMA_PERIOD, MACD_SIGNAL_PERIOD)
     _, upper_band, lower_band = calculate_bollinger_bands(all_prices, BB_PERIOD)
     long_term_sma = calculate_sma(all_prices, LONG_TERM_SMA_PERIOD)
 
     if any(v is None for v in [short_ema, long_ema, rsi, macd_histogram, upper_band, long_term_sma]):
         return "HOLD"
 
-    # Volatility Regime Detection
+    # Adaptive Volatility Regime
     log_returns = np.log(np.array(all_prices)[1:] / np.array(all_prices)[:-1])
     short_term_vol = np.std(log_returns[-VOL_SHORT_PERIOD:])
     long_term_vol = np.std(log_returns[-VOL_LONG_PERIOD:])
     is_high_volatility = (short_term_vol > long_term_vol * 1.5) and (short_term_vol > 0.015)
 
-    # --- 3. Universal Exit Logic (Risk Management First) ---
-    # This rule is designed to exit long positions to prevent large drawdowns.
-    # It triggers if the price breaks below the medium-term trend (26-day EMA)
-    # and momentum has turned negative.
-    if current_price < long_ema and macd_histogram < 0:
-        return "SELL"
+    # --- 3. Signal Scoring & Decision Logic ---
+    buy_score = 0.0
+    sell_score = 0.0
 
-    # --- 4. Regime-Based Entry & Action Logic ---
     if is_high_volatility:
-        # === CRISIS MODE: High-conviction trend-following ===
-        # Aggressive SELL signal (for entering short or liquidating in a panic)
-        if net_sentiment_score <= -2.5 and short_ema < long_ema and macd_histogram < 0 and rsi > 35:
-            return "SELL"
-        # High-conviction BUY signal
-        if net_sentiment_score >= 2.5 and short_ema > long_ema and macd_histogram > 0 and rsi < 65:
-            return "BUY"
-    else:
-        # === NORMAL MODE: Simplified, trend-filtered entries ===
-        is_long_term_uptrend = current_price > long_term_sma
-        
-        # Only consider buying if the long-term market health is positive
-        if is_long_term_uptrend:
-            # A) Momentum Entry: Buy into established, accelerating trends.
-            if short_ema > long_ema and macd_histogram > 0 and net_sentiment_score >= 1.0:
-                return "BUY"
-            
-            # B) Dip-Buying Entry: Safer mean-reversion within a primary uptrend.
-            if rsi < 35 and current_price < lower_band and net_sentiment_score > -1.5:
-                return "BUY"
+        # === CRISIS MODE: High-conviction trend-following scoring ===
+        # Stricter thresholds, focus on strong, clear signals.
+        BUY_THRESHOLD = 3.5
+        SELL_THRESHOLD = 3.5
 
-    # --- 5. Default Action ---
+        # Trend Signal (Weight: 1.5)
+        if short_ema > long_ema: buy_score += 1.5
+        if short_ema < long_ema: sell_score += 1.5
+        
+        # Momentum Signal (Weight: 1.5)
+        if macd_histogram > 0: buy_score += 1.5
+        if macd_histogram < 0: sell_score += 1.5
+
+        # Sentiment Signal (Weight: 1.0)
+        if net_sentiment_score >= 2.5: buy_score += 1.0
+        if net_sentiment_score <= -2.5: sell_score += 1.0
+        
+        # Overbought/Oversold Filter (Negative score to prevent chasing)
+        if rsi > 70: buy_score -= 1.0
+        if rsi < 30: sell_score -= 1.0
+
+    else:
+        # === UNIFIED NORMAL MODE: Flexible scoring for trend and mean-reversion ===
+        BUY_THRESHOLD = 3.0
+        SELL_THRESHOLD = 3.0
+
+        # --- Trend-Following Signals ---
+        # Trend Signal (Weight: 1.5)
+        if short_ema > long_ema: buy_score += 1.5
+        if short_ema < long_ema: sell_score += 1.5
+
+        # Momentum Signal (Weight: 1.0)
+        if macd_histogram > 0 and macd_line > 0: buy_score += 1.0
+        if macd_histogram < 0 and macd_line < 0: sell_score += 1.0
+
+        # Sentiment Signal (Weight: 1.0)
+        if net_sentiment_score >= 1.0: buy_score += 1.0
+        if net_sentiment_score <= -1.0: sell_score += 1.0
+
+        # RSI Confirmation (Weight: 0.5)
+        if 50 < rsi < 75: buy_score += 0.5
+        if 25 < rsi < 50: sell_score += 0.5
+
+        # --- Mean-Reversion Signals (with strong safety filter) ---
+        # Buy the dip ONLY if the long-term trend is still up (Weight: 1.5)
+        if rsi < 30 and current_price < lower_band and current_price > long_term_sma:
+            buy_score += 1.5
+        
+        # Sell the rip (Weight: 1.5)
+        if rsi > 70 and current_price > upper_band:
+            sell_score += 1.5
+
+    # --- 4. Final Decision ---
+    if buy_score >= BUY_THRESHOLD and buy_score > sell_score:
+        return "BUY"
+    elif sell_score >= SELL_THRESHOLD and sell_score > buy_score:
+        return "SELL"
+    
     return "HOLD"
