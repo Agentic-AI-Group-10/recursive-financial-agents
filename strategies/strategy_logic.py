@@ -14,7 +14,6 @@ def calculate_ema_series(data, period):
     if len(data) < period:
         return np.array([])
     data_arr = np.array(data, dtype=float)
-    # Correctly initialize the EMA series
     ema_values = np.zeros(len(data_arr) - period + 1, dtype=float)
     ema_values[0] = np.mean(data_arr[:period])
     multiplier = 2 / (period + 1)
@@ -45,7 +44,6 @@ def calculate_rsi(prices, period=14):
     avg_gain = seed_gains / period
     avg_loss = seed_losses / period
     
-    # Correctly iterate over remaining deltas
     for i in range(period, len(deltas)):
         delta = deltas[i]
         gain = delta if delta >= 0 else 0.0
@@ -65,14 +63,9 @@ def calculate_macd(prices, short_period=12, long_period=26, signal_period=9):
     if len(prices) < long_period + signal_period:
         return None
 
-    # Ensure enough data for MACD line calculation
-    if len(prices) < long_period:
-        return None
-        
     short_ema_series = calculate_ema_series(prices, short_period)
     long_ema_series = calculate_ema_series(prices, long_period)
     
-    # Align the series before subtraction
     macd_line = short_ema_series[len(short_ema_series)-len(long_ema_series):] - long_ema_series
     
     if len(macd_line) < signal_period:
@@ -88,10 +81,9 @@ def calculate_macd(prices, short_period=12, long_period=26, signal_period=9):
 
 def decide(current_price, price_history, news_context):
     """
-    SELF-IMPROVED STRATEGY:
-    This version addresses the critical failure of passivity by introducing an
-    asymmetric, faster exit logic to reduce drawdowns, while retaining the
-    successful regime-switching and multi-factor entry confirmation.
+    A self-improved, multi-regime trading strategy that prioritizes capital
+    preservation by introducing a defensive sell override and simplifying
+    its normal-market logic to avoid whipsaws and mean-reversion traps.
 
     Parameters:
         current_price (float): The current day's closing price for SPY.
@@ -101,7 +93,7 @@ def decide(current_price, price_history, news_context):
     Returns:
         str: "BUY", "SELL", or "HOLD"
     """
-    # --- 1. Sentiment Analysis (Unchanged - Proven Robustness) ---
+    # --- 1. Sentiment Analysis (Unchanged from successful parent) ---
     context_lower = news_context.lower()
     sentiment_keywords = {
         "fed pivot": 3.0, "rate cut": 2.5, "stimulus": 2.0, "soft landing": 2.0,
@@ -126,7 +118,7 @@ def decide(current_price, price_history, news_context):
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
             net_sentiment_score += -weight if is_negated else weight
 
-    # --- 2. Technical Indicators & Regime Detection ---
+    # --- 2. Technical Indicators & Adaptive Regime Detection ---
     all_prices = price_history + [current_price]
     
     # Define periods
@@ -138,11 +130,11 @@ def decide(current_price, price_history, news_context):
     VOL_SHORT_PERIOD = 20
     VOL_LONG_PERIOD = 100
 
-    required_history_length = max(LONG_EMA_PERIOD + MACD_SIGNAL_PERIOD, VOL_LONG_PERIOD + 1, MEDIUM_TERM_SMA_PERIOD)
+    required_history_length = max(LONG_EMA_PERIOD + MACD_SIGNAL_PERIOD, VOL_LONG_PERIOD + 1)
     if len(all_prices) < required_history_length:
         return "HOLD"
 
-    # Calculate all indicators
+    # Calculate core indicators
     short_ema = calculate_ema(all_prices, SHORT_EMA_PERIOD)
     long_ema = calculate_ema(all_prices, LONG_EMA_PERIOD)
     rsi = calculate_rsi(all_prices, RSI_PERIOD)
@@ -152,19 +144,25 @@ def decide(current_price, price_history, news_context):
     if any(v is None for v in [short_ema, long_ema, rsi, macd_histogram, medium_sma]):
         return "HOLD"
 
-    # Volatility Regime Detection (Unchanged - Proven Success)
+    # Adaptive Volatility Regime
     log_returns = np.log(np.array(all_prices)[1:] / np.array(all_prices)[:-1])
     short_term_vol = np.std(log_returns[-VOL_SHORT_PERIOD:])
     long_term_vol = np.std(log_returns[-VOL_LONG_PERIOD:])
     is_high_volatility = (short_term_vol > long_term_vol * 1.5) and (short_term_vol > 0.015)
 
-    # --- 3. Decision Logic ---
+    # --- 3. Multi-Regime Decision Logic ---
+
+    # IMPROVEMENT: Add a non-negotiable defensive sell rule to prevent holding through major drawdowns.
+    # This acts as a master override to protect capital.
+    if current_price < medium_sma and macd_histogram < 0 and short_ema < long_ema:
+        return "SELL"
+
     if is_high_volatility:
-        # === CRISIS MODE: High-conviction trend-following (Unchanged - Proven Success) ===
+        # === CRISIS MODE: High-conviction trend-following (Unchanged from successful parent) ===
         BULLISH_SENTIMENT_THRESHOLD = 2.5
         BEARISH_SENTIMENT_THRESHOLD = -2.5
-        RSI_OVERBOUGHT_CEILING = 65
-        RSI_OVERSOLD_FLOOR = 35
+        RSI_OVERBOUGHT_CEILING = 65 # More selective: don't buy into an already hot trend
+        RSI_OVERSOLD_FLOOR = 35     # More selective: don't sell into a deep oversold bounce
 
         bullish_trend = short_ema > long_ema
         bearish_trend = short_ema < long_ema
@@ -174,30 +172,24 @@ def decide(current_price, price_history, news_context):
         elif net_sentiment_score <= BEARISH_SENTIMENT_THRESHOLD and bearish_trend and macd_histogram < 0 and rsi > RSI_OVERSOLD_FLOOR:
             return "SELL"
     else:
-        # === NORMAL MODE: Trend-following with Asymmetric, Faster Exit Logic ===
-        # This new logic addresses the core failure of passivity and holding through drawdowns.
+        # === NORMAL MODE: Simplified Trend-Following ===
+        # IMPROVEMENT: Removed the flawed and whipsaw-prone sub-regime logic (trending vs. choppy).
+        # The risky mean-reversion strategy is eliminated entirely.
+        # This mode now uses a single, robust trend-following logic.
+        BULLISH_SENTIMENT_THRESHOLD = 1.0
+        BEARISH_SENTIMENT_THRESHOLD = -1.0
+        RSI_OVERBOUGHT = 70
+        RSI_OVERSOLD = 30
         
-        # --- STRICT ENTRY CONDITIONS (BUY) ---
-        # Requires strong confirmation from trend, momentum, and sentiment.
-        is_bullish_trend = short_ema > long_ema
-        is_bullish_momentum = macd_histogram > 0
-        is_strong_rsi = rsi > 52  # Use >50 as a basic filter for bullish regime
-        is_positive_sentiment = net_sentiment_score >= 1.0
-        
-        if is_bullish_trend and is_bullish_momentum and is_strong_rsi and is_positive_sentiment:
+        is_bullish_technicals = short_ema > long_ema and macd_histogram > 0.0
+        is_bearish_technicals = short_ema < long_ema and macd_histogram < 0.0
+
+        # BUY condition: Clear technical uptrend, supporting sentiment, and not overbought.
+        if is_bullish_technicals and net_sentiment_score >= BULLISH_SENTIMENT_THRESHOLD and rsi < RSI_OVERBOUGHT:
             return "BUY"
-
-        # --- ASYMMETRIC EXIT CONDITIONS (SELL) ---
-        # Faster, more sensitive exit to protect capital and lock in gains.
-        # A position is sold if the medium-term trend is broken OR if momentum clearly weakens.
-        price_breaks_medium_trend = current_price < medium_sma
-        momentum_is_weakening = rsi < 45 # Exit if RSI shows loss of relative strength
-        is_negative_sentiment = net_sentiment_score <= -1.0
-        is_bearish_trend = short_ema < long_ema
-
-        # The primary exit is breaking the medium-term SMA, acting as a stop-loss.
-        # A secondary exit is a combination of negative trend and weakening momentum.
-        if price_breaks_medium_trend or (is_bearish_trend and momentum_is_weakening) or (is_bearish_trend and is_negative_sentiment):
+        
+        # SELL condition: Clear technical downtrend, supporting sentiment, and not oversold.
+        elif is_bearish_technicals and net_sentiment_score <= BEARISH_SENTIMENT_THRESHOLD and rsi > RSI_OVERSOLD:
             return "SELL"
 
     return "HOLD"
