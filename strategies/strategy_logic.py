@@ -3,64 +3,80 @@ import re
 
 # --- Helper Functions for Technical Indicators ---
 
-def calculate_sma(prices, period):
-    """Calculates the Simple Moving Average (SMA) for the latest price."""
-    if len(prices) < period:
-        return None
-    return np.mean(prices[-period:])
-
 def calculate_ema(prices, period):
     """Calculates the Exponential Moving Average (EMA) for the latest price."""
     if len(prices) < period:
         return None
-    # Using a simplified method that is common and avoids re-calculating the full series
     prices_arr = np.array(prices, dtype=float)
-    multiplier = 2 / (period + 1)
-    # The first EMA is the SMA
-    ema = np.mean(prices_arr[:period])
-    for i in range(period, len(prices_arr)):
-        ema = (prices_arr[i] - ema) * multiplier + ema
-    return ema
+    # Using pandas for a more robust and standard EMA calculation
+    try:
+        import pandas as pd
+        return pd.Series(prices_arr).ewm(span=period, adjust=False).mean().iloc[-1]
+    except ImportError:
+        # Fallback to numpy implementation if pandas is not available
+        ema_values = np.zeros_like(prices_arr, dtype=float)
+        ema_values[period - 1] = np.mean(prices_arr[:period])
+        multiplier = 2 / (period + 1)
+        for i in range(period, len(prices_arr)):
+            ema_values[i] = (prices_arr[i] - ema_values[i-1]) * multiplier + ema_values[i-1]
+        return ema_values[-1]
+
 
 def calculate_rsi(prices, period):
     """Calculates the Relative Strength Index (RSI) for the latest price."""
     if len(prices) < period + 1:
         return None
     
-    deltas = np.diff(np.array(prices, dtype=float))
-    if len(deltas) < period:
-        return None
+    try:
+        import pandas as pd
+        prices_series = pd.Series(prices)
+        delta = prices_series.diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        return rsi.iloc[-1]
+    except (ImportError, ZeroDivisionError):
+        # Fallback to numpy implementation
+        prices_arr = np.array(prices, dtype=float)
+        deltas = np.diff(prices_arr)
+        if len(deltas) < period:
+            return None
+        
+        gains = np.where(deltas > 0, deltas, 0)
+        losses = np.where(deltas < 0, -deltas, 0)
+        
+        # Use simple moving average for the first calculation
+        avg_gain = np.mean(gains[:period])
+        avg_loss = np.mean(losses[:period])
 
-    gains = deltas[deltas > 0]
-    losses = -deltas[deltas < 0]
-
-    # Use Wilder's smoothing method for RSI calculation
-    avg_gain = np.mean(gains[:period])
-    avg_loss = np.mean(losses[:period])
-
-    for i in range(period, len(deltas)):
-        delta = deltas[i]
-        gain = delta if delta > 0 else 0
-        loss = -delta if delta < 0 else 0
-        avg_gain = (avg_gain * (period - 1) + gain) / period
-        avg_loss = (avg_loss * (period - 1) + loss) / period
-
-    if avg_loss == 0:
-        return 100.0
-    
-    rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
+        # Then use Wilder's smoothing
+        for i in range(period, len(gains)):
+            avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+            avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+        
+        if avg_loss == 0:
+            return 100.0 # RSI is 100 if avg_loss is zero
+        
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs))
+        return rsi
 
 def decide(current_price, price_history, news_context):
     """
-    A self-improved, dual-logic trading strategy that adapts its core mechanism
-    based on market volatility, addressing failures in low-volatility trending markets.
+    Self-improved trading strategy with a dual-mode, regime-switching logic.
+    - Crisis Mode (High Volatility): Prioritizes strong sentiment signals confirmed by trend.
+    - Normal Mode (Low Volatility): Operates as a pure trend-following system, ignoring news noise.
 
-    - Crisis Regime (High Volatility): High-conviction, news-driven logic.
-    - Normal Regime (Low Volatility): Pure trend-following logic.
+    Parameters:
+        current_price (float): The current day's closing price for SPY.
+        price_history (list of float): List of historical closing prices up to yesterday.
+        news_context (str): Combined news headlines from the last 24 hours.
+
+    Returns:
+        str: "BUY", "SELL", or "HOLD"
     """
-    # --- 1. Sentiment Analysis (Primarily for Crisis Regime) ---
+    # --- 1. Sentiment Analysis (Primarily for Crisis Mode) ---
     context_lower = news_context.lower()
     sentiment_keywords = {
         # Bullish
@@ -88,23 +104,21 @@ def decide(current_price, price_history, news_context):
     # Define periods
     SHORT_EMA_PERIOD = 12
     LONG_EMA_PERIOD = 26
-    LONG_TERM_TREND_PERIOD = 50 # New: For master trend confirmation
     RSI_PERIOD = 14
     VOLATILITY_PERIOD = 20
 
     # Ensure enough data for all indicators
-    required_history_length = max(LONG_EMA_PERIOD, RSI_PERIOD + 1, VOLATILITY_PERIOD + 1, LONG_TERM_TREND_PERIOD)
+    required_history_length = max(LONG_EMA_PERIOD, RSI_PERIOD + 1, VOLATILITY_PERIOD + 1)
     if len(all_prices) < required_history_length:
         return "HOLD"
 
     # Calculate core indicators
     short_ema = calculate_ema(all_prices, SHORT_EMA_PERIOD)
     long_ema = calculate_ema(all_prices, LONG_EMA_PERIOD)
-    long_term_sma = calculate_sma(all_prices, LONG_TERM_TREND_PERIOD)
     rsi = calculate_rsi(all_prices, RSI_PERIOD)
 
-    # Safeguard against None values from calculations
-    if any(v is None for v in [short_ema, long_ema, long_term_sma, rsi]):
+    # Safeguard against None values from indicator calculations
+    if short_ema is None or long_ema is None or rsi is None or np.isnan(rsi):
         return "HOLD"
 
     # Calculate volatility to determine market regime
@@ -112,12 +126,12 @@ def decide(current_price, price_history, news_context):
     volatility = np.std(log_returns[-VOLATILITY_PERIOD:])
     
     # --- 3. Adaptive Decision Logic based on Regime ---
-    is_high_volatility = volatility > 0.02  # Threshold for high-volatility regime
+    is_high_volatility = volatility > 0.02  # Threshold for high-volatility regime (e.g., >2% daily std dev)
 
     if is_high_volatility:
-        # --- CRISIS REGIME LOGIC ---
-        # This logic was successful in past stress tests. It requires a strong
-        # news catalyst, confirmed by trend, while avoiding over-extended entries.
+        # --- CRISIS MODE ---
+        # This logic was successful in past stress tests. It requires strong sentiment
+        # confirmation for trades, which is effective in news-driven, volatile markets.
         BULLISH_SENTIMENT_THRESHOLD = 1.5
         BEARISH_SENTIMENT_THRESHOLD = -1.5
         RSI_OVERBOUGHT = 65
@@ -128,33 +142,31 @@ def decide(current_price, price_history, news_context):
         is_not_overbought = rsi < RSI_OVERBOUGHT
         is_not_oversold = rsi > RSI_OVERSOLD
 
-        # BUY: Strong positive news AND an established bullish trend AND not overbought.
         if net_sentiment_score >= BULLISH_SENTIMENT_THRESHOLD and bullish_trend and is_not_overbought:
             return "BUY"
-        
-        # SELL: Strong negative news AND an established bearish trend AND not oversold.
         elif net_sentiment_score <= BEARISH_SENTIMENT_THRESHOLD and bearish_trend and is_not_oversold:
             return "SELL"
-    
     else:
-        # --- NORMAL REGIME LOGIC ---
-        # This logic is a pure trend-following system, addressing the failure of being
-        # too passive and getting faked out by news noise in stable markets.
-        # Sentiment and RSI are ignored as primary signals to avoid whipsaws.
-        
-        # Primary BUY Signal: A bullish EMA crossover confirmed by a long-term uptrend.
-        is_bullish_crossover = short_ema > long_ema
-        is_above_long_term_trend = current_price > long_term_sma
-        
-        if is_bullish_crossover and is_above_long_term_trend:
+        # --- NORMAL MODE (SELF-IMPROVEMENT) ---
+        # Past failures showed that sentiment is a noisy and ineffective filter in
+        # low-volatility, trending markets. This mode is now a pure trend-following
+        # system, using the EMA crossover as the primary signal, ignoring sentiment.
+        # This prevents the strategy from being sidelined by minor negative news during an uptrend.
+        RSI_OVERBOUGHT = 70
+        RSI_OVERSOLD = 30 # Retained for potential future use, but not in primary logic.
+
+        bullish_trend_signal = short_ema > long_ema
+        bearish_trend_signal = short_ema < long_ema
+        is_not_overbought = rsi < RSI_OVERBOUGHT
+
+        # BUY: Enter on a confirmed bullish trend, filtering for overbought conditions.
+        if bullish_trend_signal and is_not_overbought:
             return "BUY"
         
-        # Primary SELL Signal: A bearish EMA crossover indicates the trend has reversed.
-        # This acts as the exit signal for the trend-following system.
-        is_bearish_crossover = short_ema < long_ema
-        
-        if is_bearish_crossover:
+        # SELL: Exit when the primary trend reverses. This is a pure technical signal,
+        # making the exit faster and more reliable than waiting for a sentiment shift.
+        elif bearish_trend_signal:
             return "SELL"
-
-    # Default to HOLD if no high-conviction signal is generated in either regime.
+        
+    # Default to HOLD if no clear signal is generated in either regime
     return "HOLD"
