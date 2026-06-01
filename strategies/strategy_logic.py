@@ -14,8 +14,6 @@ def calculate_ema_series(data, period):
     if len(data) < period:
         return np.array([])
     data_arr = np.array(data, dtype=float)
-    # Handle potential empty or all-NaN slices gracefully
-    if len(data_arr) < period: return np.array([])
     ema_values = np.zeros(len(data_arr) - period + 1, dtype=float)
     ema_values[0] = np.mean(data_arr[:period])
     multiplier = 2 / (period + 1)
@@ -40,18 +38,14 @@ def calculate_rsi(prices, period=14):
     prices_arr = np.array(prices, dtype=float)
     deltas = np.diff(prices_arr)
     
-    if len(deltas) < period:
-        return None
-
     seed_gains = deltas[:period][deltas[:period] >= 0].sum()
     seed_losses = -deltas[:period][deltas[:period] < 0].sum()
     
     avg_gain = seed_gains / period
     avg_loss = seed_losses / period
     
-    # Rest of the deltas for smoothing
-    rest_deltas = deltas[period:]
-    for delta in rest_deltas:
+    for i in range(period, len(deltas)):
+        delta = deltas[i]
         gain = delta if delta >= 0 else 0.0
         loss = -delta if delta < 0 else 0.0
         avg_gain = (avg_gain * (period - 1) + gain) / period
@@ -72,7 +66,6 @@ def calculate_macd(prices, short_period=12, long_period=26, signal_period=9):
     short_ema_series = calculate_ema_series(prices, short_period)
     long_ema_series = calculate_ema_series(prices, long_period)
     
-    # Align series by taking the tail of the shorter period EMA series
     macd_line = short_ema_series[len(short_ema_series)-len(long_ema_series):] - long_ema_series
     
     if len(macd_line) < signal_period:
@@ -102,8 +95,8 @@ def calculate_bollinger_bands(prices, period=20, num_std_dev=2):
 
 def decide(current_price, price_history, news_context):
     """
-    A self-improved, multi-regime trading strategy with a universal protective exit
-    rule to reduce drawdowns and a safer mean-reversion entry logic.
+    A self-improved, multi-regime trading strategy with asymmetric exit logic
+    and a long-term trend filter to improve risk management and reduce passivity.
 
     Parameters:
         current_price (float): The current day's closing price for SPY.
@@ -138,7 +131,7 @@ def decide(current_price, price_history, news_context):
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
             net_sentiment_score += -weight if is_negated else weight
 
-    # --- 2. Technical Indicators & Adaptive Regime Detection ---
+    # --- 2. Technical Indicators & Regime Detection ---
     all_prices = price_history + [current_price]
     
     # Define periods
@@ -147,12 +140,12 @@ def decide(current_price, price_history, news_context):
     MACD_SIGNAL_PERIOD = 9
     RSI_PERIOD = 14
     BB_PERIOD = 20
-    FAST_SMA_PERIOD = 20 # For protective exit
     MEDIUM_TERM_SMA_PERIOD = 50
+    LONG_TERM_SMA_PERIOD = 200 # NEW: Long-term trend filter
     VOL_SHORT_PERIOD = 20
     VOL_LONG_PERIOD = 100
 
-    required_history_length = max(LONG_EMA_PERIOD + MACD_SIGNAL_PERIOD, VOL_LONG_PERIOD + 1)
+    required_history_length = max(LONG_EMA_PERIOD + MACD_SIGNAL_PERIOD, VOL_LONG_PERIOD + 1, LONG_TERM_SMA_PERIOD)
     if len(all_prices) < required_history_length:
         return "HOLD"
 
@@ -162,70 +155,70 @@ def decide(current_price, price_history, news_context):
     rsi = calculate_rsi(all_prices, RSI_PERIOD)
     macd_histogram = calculate_macd(all_prices, SHORT_EMA_PERIOD, LONG_EMA_PERIOD, MACD_SIGNAL_PERIOD)
     _, upper_band, lower_band = calculate_bollinger_bands(all_prices, BB_PERIOD)
-    fast_sma = calculate_sma(all_prices, FAST_SMA_PERIOD)
+    medium_sma = calculate_sma(all_prices, MEDIUM_TERM_SMA_PERIOD)
+    long_sma = calculate_sma(all_prices, LONG_TERM_SMA_PERIOD)
 
-    if any(v is None for v in [short_ema, long_ema, rsi, macd_histogram, upper_band, fast_sma]):
+    if any(v is None for v in [short_ema, long_ema, rsi, macd_histogram, upper_band, medium_sma, long_sma]):
         return "HOLD"
 
-    # Adaptive Volatility Regime
+    # Adaptive Volatility Regime (Unchanged from robust parent)
     log_returns = np.log(np.array(all_prices)[1:] / np.array(all_prices)[:-1])
     short_term_vol = np.std(log_returns[-VOL_SHORT_PERIOD:])
     long_term_vol = np.std(log_returns[-VOL_LONG_PERIOD:])
     is_high_volatility = (short_term_vol > long_term_vol * 1.5) and (short_term_vol > 0.015)
 
-    # --- 3. Multi-Regime Decision Logic ---
+    # --- 3. Multi-Regime Decision Logic with Asymmetric Exits ---
     buy_signal = False
     sell_signal = False
 
+    # NEW: Global Risk Filter - Avoid buying in a long-term bear market
+    is_long_term_uptrend = current_price > long_sma
+
     if is_high_volatility:
         # === CRISIS MODE: High-conviction trend-following ===
-        BULLISH_SENTIMENT_THRESHOLD = 2.5
-        BEARISH_SENTIMENT_THRESHOLD = -2.5
-        RSI_OVERBOUGHT_CEILING = 65
-        RSI_OVERSOLD_FLOOR = 35
-
-        if short_ema > long_ema and macd_histogram > 0 and rsi < RSI_OVERBOUGHT_CEILING and net_sentiment_score >= BULLISH_SENTIMENT_THRESHOLD:
+        bullish_trend = short_ema > long_ema
+        
+        # Entry: Strict, requires strong confirmation
+        if net_sentiment_score >= 2.5 and bullish_trend and macd_histogram > 0 and rsi < 65 and is_long_term_uptrend:
             buy_signal = True
-        elif short_ema < long_ema and macd_histogram < 0 and rsi > RSI_OVERSOLD_FLOOR and net_sentiment_score <= BEARISH_SENTIMENT_THRESHOLD:
+        
+        # Exit: Faster exit based on trend break or strong negative signals
+        if not bullish_trend or (net_sentiment_score <= -2.5 and macd_histogram < 0):
             sell_signal = True
     else:
-        # === NORMAL MODE: Adaptive (Trend-Following or Mean-Reversion) ===
+        # === NORMAL MODE: Adaptive with improved risk management ===
         trend_strength = abs(short_ema - long_ema) / long_ema
         is_choppy_market = trend_strength < 0.005
 
         if not is_choppy_market:
             # Sub-Regime: Normal Trending Market
-            if short_ema > long_ema and macd_histogram > 0 and rsi < 70 and net_sentiment_score >= 1.0:
+            bullish_trend = short_ema > long_ema
+            
+            # Entry (IMPROVED): Relaxed sentiment to increase participation
+            if bullish_trend and macd_histogram > 0 and rsi < 75 and net_sentiment_score > -1.5 and is_long_term_uptrend:
                 buy_signal = True
-            elif short_ema < long_ema and macd_histogram < 0 and rsi > 30 and net_sentiment_score <= -1.0:
+            
+            # Exit (IMPROVED): Asymmetric & faster to reduce drawdowns
+            # Sell if medium-term trend breaks OR momentum dies OR sentiment turns very negative
+            if current_price < medium_sma or macd_histogram < 0 or net_sentiment_score < -2.5:
                 sell_signal = True
         else:
-            # Sub-Regime: Choppy / Ranging Market (IMPROVED Mean-Reversion)
-            medium_sma = calculate_sma(all_prices, MEDIUM_TERM_SMA_PERIOD)
-            previous_rsi = calculate_rsi(all_prices[:-1], RSI_PERIOD)
+            # Sub-Regime: Choppy / Ranging Market (Mean-Reversion)
             
-            if medium_sma is not None and previous_rsi is not None:
-                # Buy the dip with confirmation: RSI must 'hook' up
-                if (rsi < 30 and rsi > previous_rsi) and \
-                   (current_price < lower_band) and \
-                   (net_sentiment_score > -2.0) and (current_price > medium_sma):
-                    buy_signal = True
-                # Sell the rip
-                elif (rsi > 70 and current_price > upper_band) and (net_sentiment_score < 2.0):
-                    sell_signal = True
+            # Entry (Buy the dip): Logic is sound, requires long-term trend confirmation
+            if rsi < 30 and current_price < lower_band and net_sentiment_score > -2.0 and is_long_term_uptrend:
+                buy_signal = True
+            
+            # Exit (Sell the rip or if dip fails):
+            # Sell into strength OR if the primary trend breaks (stop-loss)
+            if (rsi > 70 and current_price > upper_band) or not is_long_term_uptrend:
+                sell_signal = True
 
-    # --- 4. Universal Protective Exit Rule ---
-    # This rule provides a faster exit to prevent holding through drawdowns.
-    # If price drops below the fast SMA, the desired state is "cash" (SELL).
-    # This overrides holding a long position but doesn't prevent a new buy signal.
-    protective_sell_signal = current_price < fast_sma
-
-    # --- 5. Final Decision ---
-    if buy_signal:
+    # --- 4. Final Decision ---
+    # Prioritize safety: if signals conflict, hold.
+    if buy_signal and not sell_signal:
         return "BUY"
-    elif sell_signal or protective_sell_signal:
-        # If a fundamental sell signal exists, or if the protective stop is hit,
-        # the target state is to be in cash.
+    elif sell_signal and not buy_signal:
         return "SELL"
     
     return "HOLD"
