@@ -14,6 +14,7 @@ def calculate_ema_series(data, period):
     if len(data) < period:
         return np.array([])
     data_arr = np.array(data, dtype=float)
+    # Correctly initialize the EMA series calculation
     ema_values = np.zeros(len(data_arr) - period + 1, dtype=float)
     ema_values[0] = np.mean(data_arr[:period])
     multiplier = 2 / (period + 1)
@@ -44,6 +45,7 @@ def calculate_rsi(prices, period=14):
     avg_gain = seed_gains / period
     avg_loss = seed_losses / period
     
+    # Wilder's smoothing
     for i in range(period, len(deltas)):
         delta = deltas[i]
         gain = delta if delta >= 0 else 0.0
@@ -58,35 +60,29 @@ def calculate_rsi(prices, period=14):
     rsi = 100.0 - (100.0 / (1.0 + rs))
     return rsi
 
-def calculate_macd_crossover(prices, short_period=12, long_period=26, signal_period=9):
-    """
-    Calculates the latest two MACD histogram values for crossover detection.
-    Returns (current_histogram, previous_histogram).
-    """
-    # Need at least one more data point to calculate the previous histogram value
-    required_len = long_period + signal_period + 1
-    if len(prices) < required_len:
-        return None, None
+def calculate_macd(prices, short_period=12, long_period=26, signal_period=9):
+    """Calculates the MACD histogram for the latest price."""
+    if len(prices) < long_period + signal_period:
+        return None
 
-    short_ema_series = calculate_ema_series(prices, short_period)
-    long_ema_series = calculate_ema_series(prices, long_period)
+    # Calculate EMA series for the full price history
+    short_ema_full_series = calculate_ema_series(prices, short_period)
+    long_ema_full_series = calculate_ema_series(prices, long_period)
+
+    # Align the series by slicing the longer one
+    macd_line_series = short_ema_full_series[len(short_ema_full_series)-len(long_ema_full_series):] - long_ema_full_series
     
-    # Align shorter EMA series to longer one
-    macd_line = short_ema_series[len(short_ema_series)-len(long_ema_series):] - long_ema_series
-    
-    if len(macd_line) < signal_period + 1:
-        return None, None
+    if len(macd_line_series) < signal_period:
+        return None
         
-    signal_line_series = calculate_ema_series(macd_line, signal_period)
+    signal_line_series = calculate_ema_series(macd_line_series, signal_period)
     
-    if len(signal_line_series) < 2:
-        return None, None
+    if len(signal_line_series) == 0:
+        return None
         
-    # Align macd_line to the signal_line series to calculate histogram
-    macd_line_for_hist = macd_line[-len(signal_line_series):]
-    histogram_series = macd_line_for_hist - signal_line_series
-    
-    return histogram_series[-1], histogram_series[-2]
+    # The histogram is the difference between the last value of the MACD line and the last value of the signal line
+    histogram = macd_line_series[-1] - signal_line_series[-1]
+    return histogram
 
 def calculate_bollinger_bands(prices, period=20, num_std_dev=2):
     """Calculates the Bollinger Bands for the latest price."""
@@ -104,8 +100,8 @@ def calculate_bollinger_bands(prices, period=20, num_std_dev=2):
 
 def decide(current_price, price_history, news_context):
     """
-    Self-improved strategy adding a dynamic, momentum-based exit logic to the
-    proven multi-regime framework to reduce drawdowns and react faster to reversals.
+    A self-improved, multi-regime trading strategy with proactive profit-taking
+    and enhanced risk management to address passivity and drawdown risks.
 
     Parameters:
         current_price (float): The current day's closing price for SPY.
@@ -121,17 +117,17 @@ def decide(current_price, price_history, news_context):
         "fed pivot": 3.0, "rate cut": 2.5, "stimulus": 2.0, "soft landing": 2.0,
         "dovish": 2.0, "record high": 2.0, "bullish": 2.0, "surge": 2.0,
         "strong earnings": 2.0, "cooling inflation": 1.5, "disinflation": 1.5,
-        "ai boom": 2.0, "technological breakthrough": 2.0, "easing tensions": 1.5,
-        "beat": 1.5, "growth": 1.5, "recovery": 1.5, "upgrade": 1.5, "strong jobs": 2.0,
-        "consumer confidence": 1.5,
+        "ai boom": 2.5, "ai revolution": 2.5, "technological breakthrough": 2.0,
+        "easing tensions": 1.5, "beat estimates": 1.5, "growth": 1.5, "recovery": 1.5,
+        "upgrade": 1.5, "strong jobs": 2.0, "consumer confidence": 1.5,
         "rate hike": -2.5, "recession": -2.5, "crisis": -2.5, "bankruptcy": -2.5,
         "hard landing": -2.5, "stagflation": -2.5, "hawkish": -2.0, "bearish": -2.0,
-        "plunge": -2.0, "inflation": -2.0, "sell-off": -2.0, "weak earnings": -2.0,
+        "plunge": -2.0, "hot inflation": -2.5, "sell-off": -2.0, "weak earnings": -2.0,
         "geopolitical risk": -2.0, "market turmoil": -2.0, "credit crunch": -2.5,
-        "tightening": -1.5, "miss": -1.5, "downgrade": -1.5, "tariff": -1.5,
+        "tightening": -1.5, "miss estimates": -1.5, "downgrade": -1.5, "tariff": -1.5,
         "supply chain disruption": -1.5, "uncertainty": -1.5, "weak jobs": -2.0
     }
-    negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids"]
+    negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent"]
     net_sentiment_score = 0.0
     for keyword, weight in sentiment_keywords.items():
         pattern = r'\b' + re.escape(keyword) + r'\b'
@@ -152,49 +148,44 @@ def decide(current_price, price_history, news_context):
     VOL_SHORT_PERIOD = 20
     VOL_LONG_PERIOD = 100
 
-    required_history_length = max(LONG_EMA_PERIOD + MACD_SIGNAL_PERIOD + 1, VOL_LONG_PERIOD + 1)
+    required_history_length = max(LONG_EMA_PERIOD + MACD_SIGNAL_PERIOD, VOL_LONG_PERIOD + 1)
     if len(all_prices) < required_history_length:
         return "HOLD"
 
+    # Calculate core indicators
     short_ema = calculate_ema(all_prices, SHORT_EMA_PERIOD)
     long_ema = calculate_ema(all_prices, LONG_EMA_PERIOD)
     rsi = calculate_rsi(all_prices, RSI_PERIOD)
+    macd_histogram = calculate_macd(all_prices, SHORT_EMA_PERIOD, LONG_EMA_PERIOD, MACD_SIGNAL_PERIOD)
     _, upper_band, lower_band = calculate_bollinger_bands(all_prices, BB_PERIOD)
-    medium_sma = calculate_sma(all_prices, MEDIUM_TERM_SMA_PERIOD)
-    current_macd_hist, prev_macd_hist = calculate_macd_crossover(all_prices, SHORT_EMA_PERIOD, LONG_EMA_PERIOD, MACD_SIGNAL_PERIOD)
+    
+    # Calculate previous day's MACD for momentum decay check
+    previous_prices = all_prices[:-1]
+    previous_macd_histogram = calculate_macd(previous_prices, SHORT_EMA_PERIOD, LONG_EMA_PERIOD, MACD_SIGNAL_PERIOD)
 
-    if any(v is None for v in [short_ema, long_ema, rsi, upper_band, medium_sma, current_macd_hist]):
+    if any(v is None for v in [short_ema, long_ema, rsi, macd_histogram, upper_band]):
         return "HOLD"
 
-    # --- 3. Dynamic Exit & Entry Logic ---
-    
-    # --- 3a. NEW: Momentum-Based Exit Logic (Faster Reaction) ---
-    # This logic acts as a primary override to exit positions before a full trend reversal.
-    is_bullish_momentum_reversal = prev_macd_hist > 0 and current_macd_hist <= 0
-    is_bearish_momentum_reversal = prev_macd_hist < 0 and current_macd_hist >= 0
-
-    # Exit a long position if bullish momentum dies, but only if the broader trend was up.
-    if is_bullish_momentum_reversal and current_price > medium_sma:
-        return "SELL"
-    
-    # Exit a short position (by buying) if bearish momentum dies, but only if the broader trend was down.
-    if is_bearish_momentum_reversal and current_price < medium_sma:
-        return "BUY"
-
-    # --- 3b. High-Conviction Entry Logic (Adapted from Parent) ---
+    # Adaptive Volatility Regime
     log_returns = np.log(np.array(all_prices)[1:] / np.array(all_prices)[:-1])
     short_term_vol = np.std(log_returns[-VOL_SHORT_PERIOD:])
     long_term_vol = np.std(log_returns[-VOL_LONG_PERIOD:])
     is_high_volatility = (short_term_vol > long_term_vol * 1.5) and (short_term_vol > 0.015)
 
+    # --- 3. Multi-Regime Decision Logic ---
     if is_high_volatility:
-        # === CRISIS MODE: High-conviction trend-following with tighter filters ===
+        # === CRISIS MODE: High-conviction trend-following ===
+        BULLISH_SENTIMENT_THRESHOLD = 2.5
+        BEARISH_SENTIMENT_THRESHOLD = -2.5
+        RSI_OVERBOUGHT_CEILING = 65
+        RSI_OVERSOLD_FLOOR = 35
+
         bullish_trend = short_ema > long_ema
         bearish_trend = short_ema < long_ema
         
-        if net_sentiment_score >= 2.5 and bullish_trend and current_macd_hist > 0 and rsi < 65:
+        if net_sentiment_score >= BULLISH_SENTIMENT_THRESHOLD and bullish_trend and macd_histogram > 0 and rsi < RSI_OVERBOUGHT_CEILING:
             return "BUY"
-        elif net_sentiment_score <= -2.5 and bearish_trend and current_macd_hist < 0 and rsi > 35:
+        elif net_sentiment_score <= BEARISH_SENTIMENT_THRESHOLD and bearish_trend and macd_histogram < 0 and rsi > RSI_OVERSOLD_FLOOR:
             return "SELL"
     else:
         # === NORMAL MODE: Adaptive (Trend-Following or Mean-Reversion) ===
@@ -203,21 +194,42 @@ def decide(current_price, price_history, news_context):
 
         if not is_choppy_market:
             # Sub-Regime: Normal Trending Market
+            BULLISH_SENTIMENT_THRESHOLD = 1.0
+            BEARISH_SENTIMENT_THRESHOLD = -1.0
+            RSI_OVERBOUGHT = 70
+            RSI_OVERSOLD = 30
+            
             bullish_trend = short_ema > long_ema
             bearish_trend = short_ema < long_ema
 
-            if net_sentiment_score >= 1.0 and bullish_trend and current_macd_hist > 0 and rsi < 70:
+            # **NEW**: Proactive Profit-Taking on weakening momentum
+            if bullish_trend and previous_macd_histogram is not None:
+                if macd_histogram < previous_macd_histogram and rsi > 68:
+                    return "SELL"
+
+            # Standard Entry Logic
+            if net_sentiment_score >= BULLISH_SENTIMENT_THRESHOLD and bullish_trend and macd_histogram > 0 and rsi < RSI_OVERBOUGHT:
                 return "BUY"
-            elif net_sentiment_score <= -1.0 and bearish_trend and current_macd_hist < 0 and rsi > 30:
+            elif net_sentiment_score <= BEARISH_SENTIMENT_THRESHOLD and bearish_trend and macd_histogram < 0 and rsi > RSI_OVERSOLD:
                 return "SELL"
         else:
             # Sub-Regime: Choppy / Ranging Market (Mean-Reversion)
-            # Buy the dip if confirmed by RSI, Bollinger Bands, and the medium-term trend is intact.
-            if (rsi < 30 and current_price < lower_band) and \
-               (net_sentiment_score > -2.0) and (current_price > medium_sma):
+            MEAN_REVERSION_RSI_OVERSOLD = 30
+            MEAN_REVERSION_RSI_OVERBOUGHT = 70
+            
+            medium_sma = calculate_sma(all_prices, MEDIUM_TERM_SMA_PERIOD)
+            if medium_sma is None: return "HOLD"
+
+            # **NEW**: "Falling Knife" filter - avoid buying a >5% single-day drop
+            daily_change = (current_price / price_history[-1]) - 1 if price_history else 0
+            not_a_crash = daily_change > -0.05
+
+            # Buy the dip if confirmed, structurally sound, and not a crash
+            if (rsi < MEAN_REVERSION_RSI_OVERSOLD and current_price < lower_band) and \
+               (net_sentiment_score > -2.0) and (current_price > medium_sma) and not_a_crash:
                 return "BUY"
-            # Sell the rip if confirmed by RSI and Bollinger Bands.
-            elif (rsi > 70 and current_price > upper_band) and \
+            # Sell the rip if confirmed
+            elif (rsi > MEAN_REVERSION_RSI_OVERBOUGHT and current_price > upper_band) and \
                  (net_sentiment_score < 2.0):
                 return "SELL"
 
