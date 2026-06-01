@@ -21,6 +21,7 @@ def calculate_ema(prices, period):
             ema_values[i] = (prices_arr[i] - ema_values[i-1]) * multiplier + ema_values[i-1]
         return ema_values[-1]
 
+
 def calculate_rsi(prices, period):
     """Calculates the Relative Strength Index (RSI) for the latest price."""
     if len(prices) < period + 1:
@@ -54,7 +55,7 @@ def calculate_rsi(prices, period):
             avg_loss = (avg_loss * (period - 1) + losses[i]) / period
 
         if avg_loss == 0:
-            return 100.0
+            return 100.0 # RSI is 100 if avg_loss is zero
         
         rs = avg_gain / avg_loss
         rsi = 100 - (100 / (1 + rs))
@@ -62,14 +63,19 @@ def calculate_rsi(prices, period):
 
 def decide(current_price, price_history, news_context):
     """
-    SELF-IMPROVED: This version addresses the critical failure of underperforming
-    in normal, trending markets by adapting its logic based on volatility.
+    Self-improved trading strategy with a dual-logic system that adapts its core
+    approach based on market volatility, addressing lessons from past performance.
 
-    - In High-Volatility (Crisis) markets, it retains the successful contrarian
-      logic that combines strong sentiment with RSI extremes.
-    - In Normal-Volatility markets, it switches to a trend-following model,
-      using the EMA crossover as the primary signal to avoid fighting the trend,
-      a key lesson from past underperformance.
+    - Normal Regime: Trend-following (EMA) primary, with sentiment as a filter.
+    - Crisis Regime: Sentiment/Mean-reversion (RSI) primary, as news drives markets.
+
+    Parameters:
+        current_price (float): The current day's closing price for SPY.
+        price_history (list of float): List of historical closing prices up to yesterday.
+        news_context (str): Combined news headlines from the last 24 hours.
+
+    Returns:
+        str: "BUY", "SELL", or "HOLD"
     """
     # --- 1. Sentiment Analysis (Unchanged) ---
     context_lower = news_context.lower()
@@ -112,6 +118,7 @@ def decide(current_price, price_history, news_context):
     long_ema = calculate_ema(all_prices, LONG_EMA_PERIOD)
     rsi = calculate_rsi(all_prices, RSI_PERIOD)
 
+    # Safeguard against None values from indicator calculations
     if short_ema is None or long_ema is None or rsi is None:
         return "HOLD"
 
@@ -119,52 +126,53 @@ def decide(current_price, price_history, news_context):
     log_returns = np.log(np.array(all_prices)[1:] / np.array(all_prices)[:-1])
     volatility = np.std(log_returns[-VOLATILITY_PERIOD:])
     
-    # --- 3. Adaptive Decision Logic based on Regime ---
+    # --- 3. DUAL-LOGIC DECISION MAKING BASED ON REGIME ---
     is_high_volatility = volatility > 0.02  # Threshold for high-volatility regime
 
-    bullish_trend = short_ema > long_ema
-    bearish_trend = short_ema < long_ema
-
-    # --- 4. Generate Trading Signals based on Regime ---
     if is_high_volatility:
-        # CRISIS MODE: Retain the successful contrarian logic.
-        # This mode excels in volatile, news-driven, mean-reverting markets.
+        # --- CRISIS REGIME LOGIC ---
+        # In high volatility, news and sentiment are primary drivers.
+        # Use stricter thresholds and rely on the original successful crisis logic.
         BULLISH_SENTIMENT_THRESHOLD = 1.5
         BEARISH_SENTIMENT_THRESHOLD = -1.5
-        RSI_OVERBOUGHT = 65  # Tighter bands for quicker reactions
+        RSI_OVERBOUGHT = 65
         RSI_OVERSOLD = 35
 
+        bullish_trend = short_ema > long_ema
+        bearish_trend = short_ema < long_ema
         is_not_overbought = rsi < RSI_OVERBOUGHT
         is_not_oversold = rsi > RSI_OVERSOLD
 
-        # BUY: Strong positive news, bullish trend confirmation, and not overbought.
+        # BUY: Strong positive sentiment AND a bullish trend signal AND not overbought
         if net_sentiment_score >= BULLISH_SENTIMENT_THRESHOLD and bullish_trend and is_not_overbought:
             return "BUY"
         
-        # SELL: Strong negative news, bearish trend confirmation, and not oversold.
+        # SELL: Strong negative sentiment AND a bearish trend signal AND not oversold
         elif net_sentiment_score <= BEARISH_SENTIMENT_THRESHOLD and bearish_trend and is_not_oversold:
             return "SELL"
     
     else:
-        # NORMAL MODE: NEW trend-following logic to address past failures.
-        # This mode prioritizes riding sustained trends and is less sensitive to news noise
-        # and non-extreme RSI levels.
-        BULLISH_SENTIMENT_THRESHOLD = 0.5 # Require only mildly positive news to confirm trend
-        BEARISH_SENTIMENT_THRESHOLD = -1.0
-        RSI_EXTREME_OVERBOUGHT = 80 # Only stop buying if market is in a speculative frenzy
-        RSI_OVERSOLD_EXIT_CONF = 40 # Use RSI to confirm exit, but don't let it block a trend-break sell
+        # --- NORMAL REGIME LOGIC ---
+        # In low volatility, trend is primary. Sentiment is a filter/veto, not a driver.
+        # This addresses the failure of being whipsawed by news in a trending market.
+        BEARISH_SENTIMENT_VETO = -1.0 # Veto BUY if sentiment is strongly negative
+        BULLISH_SENTIMENT_VETO = 1.0  # Veto SELL if sentiment is strongly positive
+        
+        # Use relaxed RSI to avoid exiting a strong, persistent trend prematurely.
+        RSI_EXTREME_OVERBOUGHT = 80
+        RSI_EXTREME_OVERSOLD = 20
 
-        # BUY: Primary signal is the bullish trend. Confirm with non-negative sentiment
-        # and ensure RSI is not at an extreme speculative peak. This solves the problem
-        # of RSI staying "overbought" (e.g., at 72) in a healthy uptrend.
-        if bullish_trend and net_sentiment_score >= BULLISH_SENTIMENT_THRESHOLD and rsi < RSI_EXTREME_OVERBOUGHT:
+        # Primary Signal: Trend direction from EMA crossover
+        is_uptrend = short_ema > long_ema
+        is_downtrend = short_ema < long_ema
+
+        # BUY: In an uptrend, as long as sentiment isn't strongly negative and we aren't at an extreme RSI peak.
+        if is_uptrend and net_sentiment_score > BEARISH_SENTIMENT_VETO and rsi < RSI_EXTREME_OVERBOUGHT:
             return "BUY"
         
-        # SELL: Primary signal is the trend breaking down (bearish crossover).
-        # Confirm with negative sentiment. The RSI check is removed for the primary exit
-        # because if the trend is broken, we must exit.
-        elif bearish_trend and net_sentiment_score <= BEARISH_SENTIMENT_THRESHOLD:
+        # SELL: In a downtrend, as long as sentiment isn't strongly positive and we aren't at an extreme RSI bottom.
+        elif is_downtrend and net_sentiment_score < BULLISH_SENTIMENT_VETO and rsi > RSI_EXTREME_OVERSOLD:
             return "SELL"
-        
-    # Default to HOLD if no high-conviction signal is found in the current regime
+
+    # Default to HOLD if no clear signal from either regime's logic is generated.
     return "HOLD"
