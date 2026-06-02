@@ -126,6 +126,8 @@ def calculate_sentiment_score(news_context):
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
             if any(neg_word in post_context for neg_word in negation_words):
                 is_negated = not is_negated
+            if is_negated:
+                weight *= 0.3  # Reduce impact of negated terms
             net_sentiment_score += -weight if is_negated else weight
     return net_sentiment_score
 
@@ -174,7 +176,7 @@ def decide(current_price, price_history, news_context):
 
     is_deeply_oversold = rsi < 30
     is_extreme_crash_velocity = roc_20 < -18.0
-    is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold and current_price < donchian_low_30
+    is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold and current_price < donchian_low_30 and (short_atr > long_atr * 1.2)
 
     if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 20 and ema_12 > ema_26 and sentiment_score > -2.0:
         return "BUY"
