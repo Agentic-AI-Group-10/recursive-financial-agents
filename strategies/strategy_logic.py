@@ -107,16 +107,6 @@ def calculate_keltner_channel(prices, period=20):
     lower_band = sma - (atr * 2)
     return upper_band, lower_band
 
-def calculate_ichimoku_cloud(prices, period=26):
-    if len(prices) < period:
-        return None, None, None, None, None
-    tenkan_sen = np.mean(prices[-9:])
-    kijun_sen = np.mean(prices[-26:])
-    senkou_span_a = (tenkan_sen + kijun_sen) / 2
-    senkou_span_b = np.mean(prices[-52:])
-    chikou_span = prices[-26]
-    return tenkan_sen, kijun_sen, senkou_span_a, senkou_span_b, chikou_span
-
 def calculate_sentiment_score(news_context):
     context_lower = news_context.lower()
     sentiment_keywords = {
@@ -135,12 +125,12 @@ def calculate_sentiment_score(news_context):
         "uncertainty": -1.5,
         "euphoria": -2.5, "mania": -3.0, "irrational exuberance": -3.0, "extreme greed": -2.5,
     }
-    negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent"]
+    negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent", "unlikely", "avoid"]
     net_sentiment_score = 0.0
     for keyword, weight in sentiment_keywords.items():
-        pattern = r'\b' + re.escape(keyword) + r'\b'
+        pattern = r'(?<!\S)' + re.escape(keyword) + r'(?!\S)'
         for match in re.finditer(pattern, context_lower):
-            pre_context = context_lower[max(0, match.start() - 30):match.start()]
+            pre_context = context_lower[max(0, match.start() - 50):match.start()]
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
             net_sentiment_score += -weight if is_negated else weight
     return net_sentiment_score
@@ -156,8 +146,8 @@ def decide(current_price, price_history, news_context):
 
     sma_50 = np.mean(all_prices[-50:])
     sma_200 = np.mean(all_prices[-200:])
-    ema_20 = calculate_ema_series(all_prices, 20)[-1] if len(all_prices) >= 20 else None
-    ema_50 = calculate_ema_series(all_prices, 50)[-1] if len(all_prices) >= 50 else None
+    ema_12 = calculate_ema_series(all_prices, 12)[-1] if len(all_prices) >= 12 else None
+    ema_26 = calculate_ema_series(all_prices, 26)[-1] if len(all_prices) >= 26 else None
     rsi = calculate_rsi(all_prices, 14)
     macd_line, signal_line, macd_hist_series = calculate_macd_series(all_prices)
     short_atr = calculate_atr(all_prices, 10)
@@ -168,9 +158,8 @@ def decide(current_price, price_history, news_context):
     stochastic_oscillator = calculate_stochastic_oscillator(all_prices)
     fi = calculate_force_index(all_prices, all_volumes)
     keltner_upper_band, keltner_lower_band = calculate_keltner_channel(all_prices)
-    tenkan_sen, kijun_sen, senkou_span_a, senkou_span_b, chikou_span = calculate_ichimoku_cloud(all_prices)
 
-    if any(v is None for v in [sma_50, sma_200, ema_20, ema_50, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, upper_band, lower_band, stochastic_oscillator, fi]) or \
+    if any(v is None for v in [sma_50, sma_200, ema_12, ema_26, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, upper_band, lower_band, stochastic_oscillator, fi]) or \
        macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
 
@@ -189,7 +178,7 @@ def decide(current_price, price_history, news_context):
     is_extreme_crash_velocity = roc_20 < -18.0
     is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold
 
-    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 20:
+    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 20 and ema_12 > ema_26:
         return "BUY"
 
     if is_crisis_regime:
@@ -229,7 +218,7 @@ def decide(current_price, price_history, news_context):
     is_sufficient_volatility = short_atr > (long_atr * 0.6)
     is_price_in_bollinger_band = current_price > lower_band and current_price < upper_band
     is_price_in_keltner_channel = current_price > keltner_lower_band and current_price < keltner_upper_band
-    is_ema_crossover = ema_20 is not None and ema_50 is not None and ema_20 > ema_50
+    is_ema_crossover = ema_12 is not None and ema_26 is not None and ema_12 > ema_26
 
     if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_bollinger_band and is_price_in_keltner_channel and stochastic_oscillator > 20 and is_ema_crossover:
         return "BUY"
