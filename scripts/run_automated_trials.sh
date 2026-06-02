@@ -42,7 +42,18 @@ run_trial() {
     local gens="$4"
     local model_slug="${model//\//_}" # replace '/' with '_' for safe file naming
     local log_file="$CWD/logs/trial_${provider}_${model_slug}_${regime}.log"
+    local backup_file="$CWD/database/backup_trial_${provider}_${model_slug}_${regime}.sql"
+    local telemetry_backup="$CWD/telemetry_backup/telemetry_${provider}_${model_slug}_${regime}"
     
+    # Check if this trial has already been completed and backed up
+    if [ -f "$backup_file" ]; then
+        echo "================================================================================"
+        echo "⏭️  SKIPPING TRIAL: [Provider: $provider] [Model: $model] [Regime: $regime]"
+        echo "Reason: Backup file already exists at $backup_file"
+        echo "================================================================================"
+        return 0
+    fi
+
     # Select datasets based on regime
     local dataset_normal="data/simulation_pack_${regime}_normal.csv"
     local dataset_stress="data/simulation_pack_${regime}.csv"
@@ -54,7 +65,19 @@ run_trial() {
     
     echo "START: $provider | $model | $regime | $(date)" >> "$STATUS_LOG"
     
-    # Run the orchestrator with python3
+    # 1. Reset active logic workspace to baseline (main branch)
+    echo "🔄 Resetting active logic file to the baseline (main branch)..."
+    git checkout main -- "$CWD/strategies/strategy_logic.py"
+    
+    # 2. Clean up previous evolutionary git branches to avoid branch name conflicts
+    echo "🌿 Cleaning up previous local evolutionary git branches..."
+    git branch | grep "evolution_gen_" | xargs git branch -D 2>/dev/null || true
+    
+    # 3. Clear active telemetry folder to ensure we capture clean charts
+    echo "🧹 Clearing active telemetry folder..."
+    rm -rf "$CWD/telemetry/"*
+    
+    # 4. Run the orchestrator with python3
     if [ "$provider" == "google" ]; then
         local delay="$PACING_DELAY_FLASH"
         if [ "$model" == "gemini-2.5-pro" ] || [ "$model" == "gemini-1.5-pro" ]; then
@@ -87,6 +110,19 @@ run_trial() {
         echo "❌ FAILURE: $provider | $model | $regime exited with code $exit_code."
         echo "END: $provider | $model | $regime | FAILED (Code: $exit_code) | $(date)" >> "$STATUS_LOG"
     fi
+    
+    # 5. Backup the Postgres database results for this trial
+    echo "📦 Backing up database results to: $backup_file"
+    pg_dump -U ow9800 -d recursive_trading -F p -f "$backup_file"
+    
+    # 6. Archive the telemetry charts for this trial
+    echo "📁 Archiving telemetry charts to $telemetry_backup..."
+    mkdir -p "$telemetry_backup"
+    cp -r "$CWD/telemetry/"* "$telemetry_backup/" 2>/dev/null || true
+    
+    # 7. Reset/truncate the database tables to clear them for the next trial run
+    echo "🧹 Resetting database tables for the next trial run..."
+    psql -U ow9800 -d recursive_trading -c "TRUNCATE runs, lessons_learned, strategies CASCADE;"
     
     # Brief physical sleep before kicking off next model to cool down API sockets
     sleep 5
