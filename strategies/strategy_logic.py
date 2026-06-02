@@ -11,14 +11,14 @@ def calculate_ema_series(data, period):
     data_arr = np.array(data, dtype=float)
     try:
         import pandas as pd
-        return pd.Series(data_arr).ewm(span=period, adjust=False).mean().to_numpy()
+        return pd.Series(data_arr).ewm(span=period, adjust=False).mean().to_numpy()[period-1:]
     except ImportError:
-        ema_values = np.zeros_like(data_arr)
-        ema_values[period-1] = np.mean(data_arr[:period])
+        ema_values = np.zeros(len(data_arr) - period + 1, dtype=float)
+        ema_values[0] = np.mean(data_arr[:period])
         multiplier = 2 / (period + 1)
-        for i in range(period, len(data_arr)):
-            ema_values[i] = (data_arr[i] - ema_values[i-1]) * multiplier + ema_values[i-1]
-        return ema_values[period-1:]
+        for i in range(1, len(ema_values)):
+            ema_values[i] = (data_arr[i + period - 1] - ema_values[i-1]) * multiplier + ema_values[i-1]
+        return ema_values
 
 def calculate_sma(prices, period):
     """Calculates the Simple Moving Average (SMA) for the latest price."""
@@ -26,47 +26,39 @@ def calculate_sma(prices, period):
         return None
     return np.mean(prices[-period:])
 
-def calculate_rsi_series(prices, period=14):
-    """Calculates a full series of Relative Strength Index (RSI) values."""
+def calculate_rsi(prices, period=14):
+    """Calculates the Relative Strength Index (RSI) using Wilder's smoothing method."""
     if len(prices) < period + 1:
-        return np.array([])
+        return None
     prices_arr = np.array(prices, dtype=float)
     deltas = np.diff(prices_arr)
-    gains = np.where(deltas > 0, deltas, 0.0)
-    losses = np.where(deltas < 0, -deltas, 0.0)
-
-    avg_gain = np.empty(len(prices) - period)
-    avg_loss = np.empty(len(prices) - period)
-
-    avg_gain[0] = np.mean(gains[:period])
-    avg_loss[0] = np.mean(losses[:period])
-
-    for i in range(1, len(deltas) - period + 1):
-        avg_gain[i] = (avg_gain[i-1] * (period - 1) + gains[i + period - 1]) / period
-        avg_loss[i] = (avg_loss[i-1] * (period - 1) + losses[i + period - 1]) / period
-
-    rs = np.divide(avg_gain, avg_loss, out=np.full_like(avg_gain, np.inf), where=avg_loss!=0)
-    rsi = 100.0 - (100.0 / (1.0 + rs))
-    return rsi
+    seed_gains = deltas[:period][deltas[:period] >= 0].sum()
+    seed_losses = -deltas[:period][deltas[:period] < 0].sum()
+    avg_gain = seed_gains / period
+    avg_loss = seed_losses / period
+    for i in range(period, len(deltas)):
+        delta = deltas[i]
+        gain = delta if delta >= 0 else 0.0
+        loss = -delta if delta < 0 else 0.0
+        avg_gain = (avg_gain * (period - 1) + gain) / period
+        avg_loss = (avg_loss * (period - 1) + loss) / period
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return 100.0 - (100.0 / (1.0 + rs))
 
 def calculate_macd_series(prices, short_period=12, long_period=26, signal_period=9):
     """Calculates the MACD line, signal line, and histogram series."""
     if len(prices) < long_period:
         return None, None, None
-    prices_arr = np.array(prices, dtype=float)
-    short_ema_full = calculate_ema_series(prices_arr, short_period)
-    long_ema_full = calculate_ema_series(prices_arr, long_period)
-    
-    # Align series before subtraction
-    macd_line = short_ema_full[long_period-short_period:] - long_ema_full[long_period-1:]
-    
+    short_ema_series = calculate_ema_series(prices, short_period)
+    long_ema_series = calculate_ema_series(prices, long_period)
+    macd_line = short_ema_series[len(short_ema_series)-len(long_ema_series):] - long_ema_series
     if len(macd_line) < signal_period:
         return macd_line, None, None
-    
-    signal_line_full = calculate_ema_series(macd_line, signal_period)
-    histogram = macd_line[signal_period-1:] - signal_line_full[signal_period-1:]
-    
-    return macd_line, signal_line_full, histogram
+    signal_line = calculate_ema_series(macd_line, signal_period)
+    histogram = macd_line[len(macd_line)-len(signal_line):] - signal_line
+    return macd_line, signal_line, histogram
 
 def calculate_atr(prices, period=14):
     """Calculates Average True Range (ATR) using close-to-close volatility."""
@@ -74,164 +66,148 @@ def calculate_atr(prices, period=14):
         return None
     prices_arr = np.array(prices, dtype=float)
     price_ranges = np.abs(np.diff(prices_arr))
-    # Use Wilder's smoothing for ATR, which is equivalent to an EMA with alpha = 1/period
-    try:
-        import pandas as pd
-        return pd.Series(price_ranges).ewm(alpha=1/period, adjust=False).mean().iloc[-1]
-    except ImportError:
-        atr_val = np.mean(price_ranges[:period])
-        for i in range(period, len(price_ranges)):
-            atr_val = ((atr_val * (period - 1)) + price_ranges[i]) / period
-        return atr_val
+    atr_series = calculate_ema_series(price_ranges, period)
+    return atr_series[-1] if len(atr_series) > 0 else None
 
-def calculate_kama(prices, period=10, fast_ema_period=2, slow_ema_period=30):
-    """Calculates Kaufman's Adaptive Moving Average (KAMA)."""
+def calculate_roc(prices, period=20):
+    """Calculates the Rate of Change (ROC) over a given period."""
     if len(prices) < period + 1:
         return None
-    prices_arr = np.array(prices, dtype=float)
-    
-    change = np.abs(prices_arr[period:] - prices_arr[:-period])
-    volatility_windows = [np.sum(np.abs(np.diff(prices_arr[i:i+period+1]))) for i in range(len(prices_arr) - period)]
-    volatility = np.array(volatility_windows)
-    
-    er = np.divide(change, volatility, out=np.zeros_like(change, dtype=float), where=volatility!=0)
+    return ((prices[-1] - prices[-1 - period]) / prices[-1 - period]) * 100
 
-    fast_sc = 2 / (fast_ema_period + 1)
-    slow_sc = 2 / (slow_ema_period + 1)
-    sc = (er * (fast_sc - slow_sc) + slow_sc) ** 2
-
-    kama = np.zeros_like(prices_arr)
-    kama[period] = np.mean(prices_arr[:period+1])
-    
-    for i in range(period + 1, len(prices_arr)):
-        sc_index = i - (period + 1)
-        kama[i] = kama[i-1] + sc[sc_index] * (prices_arr[i] - kama[i-1])
-        
-    return kama[-1]
+def calculate_bollinger_bands(prices, period=20, num_std_dev=2):
+    """Calculates the Bollinger Bands."""
+    if len(prices) < period:
+        return None, None, None
+    sma = np.mean(prices[-period:])
+    std_dev = np.std(prices[-period:])
+    upper_band = sma + (std_dev * num_std_dev)
+    lower_band = sma - (std_dev * num_std_dev)
+    return upper_band, sma, lower_band
 
 def decide(current_price, price_history, news_context):
     """
     SELF-IMPROVED STRATEGY v2:
-    This version evolves the successful parent by introducing adaptive logic and more robust risk management.
-    1.  Adaptive Trend Filter: Replaces the static 50-day SMA with Kaufman's Adaptive Moving Average (KAMA),
-        which automatically adjusts its speed based on market volatility to reduce whipsaws and lag.
-    2.  Enhanced Risk Management: Adds a volatility-based "panic sell" trigger (daily drop > 3x ATR) and
-        refines the RSI profit-taking to only trigger after momentum demonstrably wanes (crosses down from overbought).
-    3.  Nuanced Sentiment Analysis: Normalizes the sentiment score based on keyword density and dampens the
-        signal during conflicting news reports, reducing false signals from sensational headlines.
+    This version evolves the successful parent by:
+    1.  Dynamic Volatility-Based Stop-Loss: Replaces the fixed-percentage stop with an
+        ATR-based trailing stop to adapt to changing market volatility.
+    2.  Bollinger Band Confirmation: Adds Bollinger Bands to better identify overextended
+        conditions, providing stronger confirmation for profit-taking signals.
+    3.  V-Shape Recovery Logic: Implements a specific rule using ROC to detect powerful
+        upward thrusts, allowing for faster re-entry after a major crash.
     """
-    # --- 1. Configuration ---
-    class Config:
-        # Trend and Momentum
-        KAMA_PERIOD = 20
-        SMA_LONG_TERM = 100
-        RSI_PERIOD = 14
-        MACD_SHORT, MACD_LONG, MACD_SIGNAL = 12, 26, 9
-        # Volatility and Risk
-        ATR_PERIOD = 14
-        ATR_PANIC_MULTIPLIER = 3.0
-        STOP_LOSS_LOOKBACK = 20
-        STOP_LOSS_PERCENT = 0.93 # 7% drop from peak
-        # Thresholds
-        RSI_OVERBOUGHT_ENTRY = 78
-        RSI_OVERBOUGHT_EXIT_PEAK = 80
-        RSI_OVERBOUGHT_EXIT_CONFIRM = 75
-
-    # --- 2. Sentiment Analysis (Enhanced) ---
+    # --- 1. Sentiment Analysis ---
     context_lower = news_context.lower()
     sentiment_keywords = {
-        "positive": {
-            "fed pivot": 3.0, "rate cut": 2.5, "soft landing": 2.5, "cooling inflation": 2.5,
-            "ai boom": 2.5, "stimulus": 2.0, "dovish": 2.0, "record high": 2.0,
-            "bullish": 2.0, "strong earnings": 2.0, "beat estimates": 1.5, "recovery": 1.5,
-            "capitulation": 3.0, "panic selling": 2.5, "extreme fear": 2.0
-        },
-        "negative": {
-            "recession": -3.0, "crisis": -3.0, "stagflation": -3.0, "hot inflation": -3.0,
-            "war": -3.0, "yield curve inversion": -3.5, "quantitative tightening": -2.5,
-            "black swan": -4.0, "systemic risk": -4.0, "contagion": -3.5, "rate hike": -2.5,
-            "bankruptcy": -2.5, "hard landing": -2.5, "cpi beat": -2.5, "vix spike": -2.5,
-            "hawkish": -2.0, "bearish": -2.0, "sell-off": -2.0, "bubble": -2.0,
-            "uncertainty": -1.5, "strong jobs report": -1.0, # Can be hawkish
-            "euphoria": -2.5, "mania": -3.0, "irrational exuberance": -3.0
-        }
+        "fed pivot": 3.0, "rate cut": 2.5, "quantitative easing": 2.5, "soft landing": 2.5,
+        "cooling inflation": 2.5, "cpi miss": 2.5, "ai boom": 2.5, "stimulus": 2.0,
+        "dovish": 2.0, "record high": 2.0, "bullish": 2.0, "strong earnings": 2.0,
+        "beat estimates": 1.5, "recovery": 1.5, "upgrade": 1.5, "de-escalation": 2.0,
+        "capitulation": 3.0, "panic selling": 2.5, "extreme fear": 2.0,
+        "recession": -3.0, "crisis": -3.0, "stagflation": -3.0, "hot inflation": -3.0,
+        "war": -3.0, "yield curve inversion": -3.5, "quantitative tightening": -2.5,
+        "black swan": -4.0, "systemic risk": -4.0, "contagion": -3.5,
+        "rate hike": -2.5, "bankruptcy": -2.5, "hard landing": -2.5, "geopolitical risk": -2.5,
+        "cpi beat": -2.5, "vix spike": -2.5, "hawkish": -2.0, "bearish": -2.0,
+        "sell-off": -2.0, "weak earnings": -2.0, "market turmoil": -2.0, "bubble": -2.0,
+        "uncertainty": -1.5, "strong jobs report": -1.0,
+        "euphoria": -2.5, "mania": -3.0, "irrational exuberance": -3.0, "extreme greed": -2.5,
     }
-    negation_words = ["not", "no", "lack of", "fail to", "without", "avoids", "prevent"]
-    
+    negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent"]
     net_sentiment_score = 0.0
-    pos_hits, neg_hits = 0, 0
-    
-    all_keywords = {**sentiment_keywords["positive"], **sentiment_keywords["negative"]}
-    for keyword, weight in all_keywords.items():
-        if re.search(r'\b' + re.escape(keyword) + r'\b', context_lower):
-            # Simple negation check for now
-            net_sentiment_score += weight
-            if weight > 0: pos_hits += 1
-            else: neg_hits += 1
-    
-    # Dampen score if news is highly conflicting
-    if pos_hits > 0 and neg_hits > 0:
-        net_sentiment_score *= 0.5
+    for keyword, weight in sentiment_keywords.items():
+        pattern = r'\b' + re.escape(keyword) + r'\b'
+        for match in re.finditer(pattern, context_lower):
+            pre_context = context_lower[max(0, match.start() - 30):match.start()]
+            is_negated = any(neg_word in pre_context for neg_word in negation_words)
+            net_sentiment_score += -weight if is_negated else weight
 
-    # --- 3. Technical Indicators & State Calculation ---
+    # --- 2. Technical Indicators & State Calculation ---
     all_prices = price_history + [current_price]
-    required_history_length = Config.SMA_LONG_TERM + 5
+
+    # Indicator Periods
+    SMA_TREND_LONG = 100
+    SMA_TREND_MEDIUM = 50
+    RSI_PERIOD = 14
+    ATR_SHORT = 14
+    ATR_LONG = 50
+    ROC_PERIOD = 20
+    STOP_LOSS_LOOKBACK = 20
+    BB_PERIOD = 20
+
+    required_history_length = max(SMA_TREND_LONG + 1, ATR_LONG + 1, 50)
     if len(all_prices) < required_history_length:
         return "HOLD"
 
-    # Calculate indicators
-    kama = calculate_kama(all_prices, period=Config.KAMA_PERIOD)
-    sma_100 = calculate_sma(all_prices, Config.SMA_LONG_TERM)
-    rsi_series = calculate_rsi_series(all_prices, Config.RSI_PERIOD)
-    _, _, macd_hist_series = calculate_macd_series(all_prices, Config.MACD_SHORT, Config.MACD_LONG, Config.MACD_SIGNAL)
-    atr = calculate_atr(all_prices, Config.ATR_PERIOD)
-    donchian_high = np.max(all_prices[-Config.STOP_LOSS_LOOKBACK:])
+    # Calculate core indicators
+    sma_100 = calculate_sma(all_prices, SMA_TREND_LONG)
+    sma_50 = calculate_sma(all_prices, SMA_TREND_MEDIUM)
+    rsi = calculate_rsi(all_prices, RSI_PERIOD)
+    _, _, macd_hist_series = calculate_macd_series(all_prices)
+    short_atr = calculate_atr(all_prices, ATR_SHORT)
+    long_atr = calculate_atr(all_prices, ATR_LONG)
+    roc_20 = calculate_roc(all_prices, ROC_PERIOD)
+    donchian_high_20 = np.max(all_prices[-STOP_LOSS_LOOKBACK:]) if len(all_prices) >= STOP_LOSS_LOOKBACK else None
+    upper_bb, _, _ = calculate_bollinger_bands(all_prices, BB_PERIOD)
 
     # Null check for all indicators
-    if any(v is None for v in [kama, sma_100, atr, donchian_high]) or macd_hist_series is None or len(macd_hist_series) < 2 or len(rsi_series) < 2:
+    if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_20, upper_bb]) or macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
 
-    # Assign latest values
-    rsi, prev_rsi = rsi_series[-1], rsi_series[-2]
-    macd_hist, prev_macd_hist = macd_hist_series[-1], macd_hist_series[-2]
-    daily_change = current_price - price_history[-1]
+    macd_histogram = macd_hist_series[-1]
+    prev_macd_histogram = macd_hist_series[-2]
 
-    # --- 4. Regime Detection ---
+    # --- 3. Regime Detection ---
     is_long_term_downtrend = current_price < sma_100
-    is_panic_drop = daily_change < (-Config.ATR_PANIC_MULTIPLIER * atr)
-    is_crisis_regime = is_long_term_downtrend or is_panic_drop
+    is_high_volatility = short_atr > (long_atr * 1.75)
+    is_crash_velocity = roc_20 < -15.0
+    is_crisis_regime = (is_long_term_downtrend and is_high_volatility) or is_crash_velocity
 
-    # --- 5. Decision Logic ---
+    # --- 4. Decision Logic ---
 
-    # REGIME 1: CRISIS AVERSION / PANIC SELL
+    # REGIME 1: CRISIS AVERSION
     if is_crisis_regime:
-        return "SELL" # In a crisis, get out. No questions.
+        return "SELL" # Be more aggressive in selling during crisis detection
 
-    # REGIME 2: NORMAL MARKET CONDITIONS
+    # REGIME 2: NORMAL / RECOVERY
 
-    # --- SELL LOGIC ---
-    # Priority 1: Dynamic Stop-Loss based on recent peak.
-    if current_price < (donchian_high * Config.STOP_LOSS_PERCENT):
+    # --- SELL LOGIC (Enhanced with Dynamic Stop-Loss & BB) ---
+    # Priority 1: Dynamic, Volatility-based Stop-Loss.
+    stop_price = donchian_high_20 - (short_atr * 3.0)
+    if current_price < stop_price:
         return "SELL"
 
-    # Priority 2: Adaptive Trend Breakdown. KAMA is faster than SMA.
-    is_adaptive_downtrend = current_price < kama
-    is_momentum_confirming_down = macd_hist < 0 and prev_macd_hist >= 0
-    if is_adaptive_downtrend and is_momentum_confirming_down:
+    # Priority 2: Standard trend breakdown signal.
+    is_trend_breakdown = current_price < sma_50
+    is_momentum_confirming_down = macd_histogram < 0 and prev_macd_histogram >= 0
+    if is_trend_breakdown and is_momentum_confirming_down:
         return "SELL"
 
-    # Priority 3: Intelligent Profit-Taking on Fading Momentum.
-    is_waning_from_peak = prev_rsi > Config.RSI_OVERBOUGHT_EXIT_PEAK and rsi < Config.RSI_OVERBOUGHT_EXIT_CONFIRM
-    if is_waning_from_peak:
+    # Priority 3: Profit-taking on extreme overextension with fading momentum.
+    is_momentum_fading = macd_histogram > 0 and macd_histogram < prev_macd_histogram
+    is_extremely_overbought = rsi > 82 or current_price > upper_bb
+    if is_extremely_overbought and is_momentum_fading and net_sentiment_score < 1.0:
         return "SELL"
 
-    # --- BUY LOGIC ---
-    is_adaptive_uptrend = current_price > kama
-    is_momentum_confirming_up = macd_hist > 0 and prev_macd_hist <= 0
-    is_not_overbought = rsi < Config.RSI_OVERBOUGHT_ENTRY
-    is_sentiment_permissive = net_sentiment_score > -2.0 # Tolerate some uncertainty
+    # --- BUY LOGIC (With V-Shape Recovery Entry) ---
+    is_momentum_confirming_up = macd_histogram > 0 and prev_macd_histogram <= 0
+    is_not_overbought = rsi < 78
+    is_sentiment_permissive_for_buy = net_sentiment_score > -2.5
+    is_sufficient_volatility = short_atr > (long_atr * 0.6)
 
-    if is_adaptive_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive:
+    # Condition A: Standard trend-following entry
+    is_primary_uptrend = current_price > sma_50
+    standard_buy_signal = (is_primary_uptrend and is_momentum_confirming_up and
+                           is_not_overbought and is_sentiment_permissive_for_buy and
+                           is_sufficient_volatility)
+
+    # Condition B: V-Shape Recovery entry
+    is_strong_upward_thrust = roc_20 > 10.0 # >10% gain in 20 days
+    is_strong_positive_sentiment = net_sentiment_score > 3.0
+    v_shape_recovery_signal = (not is_primary_uptrend and is_momentum_confirming_up and
+                               is_strong_upward_thrust and is_strong_positive_sentiment)
+
+    if standard_buy_signal or v_shape_recovery_signal:
         return "BUY"
 
     # Default action is to hold the current position.
