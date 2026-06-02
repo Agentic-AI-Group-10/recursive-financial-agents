@@ -128,7 +128,14 @@ def calculate_sentiment_score(news_context):
         "market breadth expansion": 1.8, "liquidity surge": 2.4, "portfolio rebalancing": 1.5,
         "technical breakout": 2.3, "short covering": 2.5, "liquidity crunch": -2.8,
         "margin squeeze": -2.7, "deleveraging": -2.5, "credit expansion": 2.3,
-        "inflation easing": 2.9, "market stability": 2.4, "policy clarity": 2.3
+        "inflation easing": 2.9, "market stability": 2.4, "policy clarity": 2.3,
+        "market consolidation": 1.4, "volatility surge": -2.4, "liquidity expansion": 2.1,
+        "risk parity": 1.9, "portfolio diversification": 1.7, "safe haven rotation": 2.3,
+        "economic resilience": 2.5, "policy support": 2.6, "market confidence": 2.2,
+        "bullish momentum": 2.4, "bearish momentum": -2.4, "market breadth contraction": -1.7,
+        "valuation peak": -2.8, "valuation trough": 2.8, "liquidity contraction": -2.7,
+        "portfolio concentration": -1.8, "portfolio diversification": 1.8, "risk parity": 1.9,
+        "economic expansion": 2.1, "growth acceleration": 2.5, "policy uncertainty": -2.0
     }
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent", "unlikely", "avoid", "no signs of", "unlikely to", "lack", "absence", "never", "none", "neglect", "without", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "never again", "no longer", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "without any", "lack any", "fail any", "struggle any", "prevent any", "avoid any", "unlikely any", "neglect any"]
     net_sentiment_score = 0.0
@@ -182,6 +189,7 @@ def decide(current_price, price_history, news_context):
     macd_histogram = macd_hist_series[-1]
     prev_macd_histogram = macd_hist_series[-2]
     macd_hist_delta = macd_histogram - prev_macd_histogram
+    macd_hist_acceleration = macd_hist_delta - (macd_hist_series[-3] - macd_hist_series[-2]) if len(macd_hist_series) >= 3 else 0
 
     is_high_volatility = short_atr > (long_atr * 1.75)
     is_extreme_volatility = short_atr > (long_atr * 2.0)
@@ -194,7 +202,7 @@ def decide(current_price, price_history, news_context):
     is_extreme_crash_velocity = roc_20 < -18.0
     is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold and current_price < donchian_low_30 and (short_atr > long_atr * 1.2) and current_price < keltner_lower_band
 
-    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 15 and ema_12 > ema_26 and sentiment_score > -1.5:
+    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 15 and ema_12 > ema_26 and sentiment_score > -1.5 and macd_hist_acceleration > 0:
         return "BUY"
 
     if is_crisis_regime:
@@ -213,7 +221,8 @@ def decide(current_price, price_history, news_context):
     else:
         stop_loss_factor = base_stop_loss_factor
 
-    if current_price < (donchian_high_30 * stop_loss_factor) and current_price < keltner_upper_band and current_price < bollinger_upper:
+    atr_stop = keltner_lower_band + (short_atr * 0.5)
+    if current_price < atr_stop and current_price < donchian_high_30 * stop_loss_factor:
         return "SELL"
 
     is_primary_downtrend = current_price < sma_50
@@ -237,7 +246,7 @@ def decide(current_price, price_history, news_context):
     is_ema_crossover = ema_12 is not None and ema_26 is not None and ema_12 > ema_26
     is_bollinger_in_range = current_price > bollinger_lower and current_price < bollinger_upper
 
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_keltner_channel and is_bollinger_in_range and stochastic_oscillator > 30 and is_ema_crossover:
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_keltner_channel and is_bollinger_in_range and stochastic_oscillator > 30 and is_ema_crossover and macd_hist_acceleration > 0:
         return "BUY"
 
     return "HOLD"
