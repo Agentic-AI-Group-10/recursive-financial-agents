@@ -18,10 +18,11 @@ def calculate_ema_series(data, period):
     except ImportError:
         # Fallback pure-python EMA calculation, using SMA for the first value
         ema_values = np.zeros(len(data_arr) - period + 1, dtype=float)
-        ema_values[0] = np.mean(data_arr[:period])
-        multiplier = 2 / (period + 1)
-        for i in range(1, len(ema_values)):
-            ema_values[i] = (data_arr[i + period - 1] - ema_values[i-1]) * multiplier + ema_values[i-1]
+        if len(data_arr) >= period:
+            ema_values[0] = np.mean(data_arr[:period])
+            multiplier = 2 / (period + 1)
+            for i in range(1, len(ema_values)):
+                ema_values[i] = (data_arr[i + period - 1] - ema_values[i-1]) * multiplier + ema_values[i-1]
         return ema_values
 
 def calculate_sma(prices, period):
@@ -67,6 +68,9 @@ def calculate_macd_series(prices, short_period=12, long_period=26, signal_period
     short_ema_series = calculate_ema_series(prices, short_period)
     long_ema_series = calculate_ema_series(prices, long_period)
     
+    if len(short_ema_series) == 0 or len(long_ema_series) == 0:
+        return None, None, None
+
     # MACD line is the difference between short and long EMA.
     # Align the series lengths by taking the tail of the shorter EMA.
     macd_line = short_ema_series[len(short_ema_series)-len(long_ema_series):] - long_ema_series
@@ -76,6 +80,9 @@ def calculate_macd_series(prices, short_period=12, long_period=26, signal_period
         
     signal_line = calculate_ema_series(macd_line, signal_period)
     
+    if len(signal_line) == 0:
+        return macd_line, None, None
+
     # Histogram is MACD line minus signal line.
     # Align the series lengths again.
     histogram = macd_line[len(macd_line)-len(signal_line):] - signal_line
@@ -99,11 +106,13 @@ def calculate_roc(prices, period=20):
     if len(prices) < period + 1:
         return None
     # ROC = ((Current Price - Price N periods ago) / Price N periods ago) * 100
+    if prices[-1 - period] == 0: # Avoid division by zero
+        return 0.0
     return ((prices[-1] - prices[-1 - period]) / prices[-1 - period]) * 100
 
 def decide(current_price, price_history, news_context):
     """
-    SELF-IMPROVED STRATEGY V5:
+    SELF-IMPROVED STRATEGY V6:
     This version refines the strategy based on lessons from stress regimes, particularly
     aiming to improve participation in V-shaped recoveries during crises.
     1.  Adaptive Dynamic Stop-Loss: The stop-loss percentage is dynamic (8% to 10% based on ATR),
@@ -111,8 +120,8 @@ def decide(current_price, price_history, news_context):
     2.  Nuanced Crisis Aversion: The "Crisis Aversion" logic is enhanced. While still
         defensive, it now allows the strategy to BUY (instead of just HOLD) if in a crisis
         regime but showing strong early signs of recovery (positive MACD histogram delta
-        and RSI bouncing from extreme lows), AND if sentiment is not catastrophically negative.
-        This aims to prevent missing V-shaped recovery entries.
+        and RSI bouncing from extreme lows), AND if sentiment is not catastrophically negative
+        (net_sentiment_score > -4.0). This aims to prevent missing V-shaped recovery entries.
     3.  Maintains Robust Normal Regime Logic: The core trend-following and
         momentum-based buy/sell signals, along with profit-taking in overbought
         conditions, remain effective for stable market environments. The capitulation
@@ -167,14 +176,15 @@ def decide(current_price, price_history, news_context):
     sma_100 = calculate_sma(all_prices, SMA_TREND_LONG)
     sma_50 = calculate_sma(all_prices, SMA_TREND_MEDIUM)
     rsi = calculate_rsi(all_prices, RSI_PERIOD)
-    _, _, macd_hist_series = calculate_macd_series(all_prices)
+    macd_line, signal_line, macd_hist_series = calculate_macd_series(all_prices)
     short_atr = calculate_atr(all_prices, ATR_SHORT)
     long_atr = calculate_atr(all_prices, ATR_LONG)
     roc_20 = calculate_roc(all_prices, ROC_CRASH_PERIOD)
     donchian_high_20 = np.max(all_prices[-STOP_LOSS_LOOKBACK:]) if len(all_prices) >= STOP_LOSS_LOOKBACK else None
 
     # Null check for all indicators
-    if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_20]) or macd_hist_series is None or len(macd_hist_series) < 2:
+    if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_20]) or \
+       macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
 
     macd_histogram = macd_hist_series[-1]
