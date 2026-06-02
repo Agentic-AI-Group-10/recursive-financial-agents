@@ -77,30 +77,32 @@ def calculate_roc(prices, period=20):
         return None
     return ((prices[-1] - prices[-1 - period]) / prices[-1 - period]) * 100
 
-def calculate_bollinger_bands(prices, period=20, num_std_dev=2):
-    """Calculates the Bollinger Bands for the latest price."""
-    if len(prices) < period:
-        return None, None, None
-    sma = np.mean(prices[-period:])
-    std_dev = np.std(prices[-period:])
-    upper_band = sma + (std_dev * num_std_dev)
-    lower_band = sma - (std_dev * num_std_dev)
-    return sma, upper_band, lower_band
+def calculate_trend_efficiency(prices, period=20):
+    """Calculates a trend efficiency ratio to identify choppy vs. trending markets."""
+    if len(prices) < period + 1:
+        return None
+    relevant_prices = np.array(prices[-period-1:], dtype=float)
+    net_change = abs(relevant_prices[-1] - relevant_prices[0])
+    sum_of_daily_changes = np.sum(np.abs(np.diff(relevant_prices)))
+    if sum_of_daily_changes == 0:
+        return 0.0 # No movement, no trend
+    return net_change / sum_of_daily_changes
 
 def decide(current_price, price_history, news_context):
     """
     SELF-IMPROVED STRATEGY V3:
-    This version evolves the successful parent strategy with three key enhancements:
-    1.  Adaptive ATR Trailing Stop: Replaces the fixed percentage stop-loss with a
-        dynamic stop based on a multiple of the Average True Range (ATR). This
-        adapts risk management to current market volatility, tightening in quiet
-        markets and loosening in volatile ones.
-    2.  Volatility-Weighted Sentiment: The impact of the news sentiment score is now
-        amplified during periods of high volatility. This makes the strategy more
-        responsive to narratives during market stress or euphoria.
-    3.  Consolidation Breakout Signal: A new buy signal using Bollinger Bands has
-        been added to identify and enter trades when price breaks out of a
-        low-volatility consolidation, capturing potential new trends earlier.
+    This version enhances V2 with three major architectural improvements:
+    1.  Adaptive Volatility Stop-Loss: Replaces the fixed 7% stop-loss with a
+        dynamic ATR-based "Chandelier Exit". This adapts risk management to
+        current market volatility, preventing premature exits in volatile uptrends
+        while tightening stops in quiet periods.
+    2.  Trend Efficiency Filter: Introduces a new indicator to quantify the
+        "choppiness" of the market. Buy signals are now filtered to only activate
+        in efficient, trending environments, significantly reducing whipsaw trades
+        in sideways markets.
+    3.  Enhanced Pullback Entries: The buy logic is upgraded to recognize and
+        act on pullbacks within an established uptrend, allowing for more timely
+        entries instead of waiting for lagging momentum crossover signals.
     """
     # --- 1. Sentiment Analysis ---
     context_lower = news_context.lower()
@@ -109,12 +111,12 @@ def decide(current_price, price_history, news_context):
         "cooling inflation": 2.5, "cpi miss": 2.5, "ai boom": 2.5, "stimulus": 2.0,
         "dovish": 2.0, "record high": 2.0, "bullish": 2.0, "strong earnings": 2.0,
         "beat estimates": 1.5, "recovery": 1.5, "upgrade": 1.5, "de-escalation": 2.0,
-        "short squeeze": 3.5, "capitulation": 3.0, "panic selling": 2.5, "extreme fear": 2.0,
-        "strong jobs report": 0.5,
+        "market bottom": 4.0, "short squeeze": 3.5, "capitulation": 3.5, "panic selling": 3.0,
+        "strong jobs report": 0.5, # Ambiguous
         "recession": -3.0, "crisis": -3.0, "stagflation": -3.0, "hot inflation": -3.0,
         "war": -3.0, "yield curve inversion": -3.5, "quantitative tightening": -2.5,
         "black swan": -4.0, "systemic risk": -4.0, "contagion": -3.5, "credit crunch": -3.5,
-        "rate hike": -2.5, "bankruptcy": -2.5, "hard landing": -2.5, "geopolitical risk": -2.5,
+        "debt ceiling": -3.5, "rate hike": -2.5, "bankruptcy": -2.5, "hard landing": -2.5,
         "cpi beat": -2.5, "vix spike": -2.5, "hawkish": -2.0, "bearish": -2.0,
         "sell-off": -2.0, "weak earnings": -2.0, "market turmoil": -2.0, "bubble": -2.0,
         "uncertainty": -1.5,
@@ -136,14 +138,12 @@ def decide(current_price, price_history, news_context):
     SMA_TREND_LONG = 100
     SMA_TREND_MEDIUM = 50
     RSI_PERIOD = 14
-    ATR_SHORT = 10
-    ATR_LONG = 50
+    ATR_PERIOD = 14
     ROC_CRASH_PERIOD = 20
     STOP_LOSS_LOOKBACK = 20
-    BB_PERIOD = 20
-    ATR_STOP_MULTIPLIER = 2.5
+    TREND_EFFICIENCY_PERIOD = 20
 
-    required_history_length = max(SMA_TREND_LONG + 1, ATR_LONG + 1, ROC_CRASH_PERIOD + 1, 50)
+    required_history_length = max(SMA_TREND_LONG + 1, 50)
     if len(all_prices) < required_history_length:
         return "HOLD"
 
@@ -152,34 +152,27 @@ def decide(current_price, price_history, news_context):
     sma_50 = calculate_sma(all_prices, SMA_TREND_MEDIUM)
     rsi = calculate_rsi(all_prices, RSI_PERIOD)
     _, _, macd_hist_series = calculate_macd_series(all_prices)
-    short_atr = calculate_atr(all_prices, ATR_SHORT)
-    long_atr = calculate_atr(all_prices, ATR_LONG)
+    atr = calculate_atr(all_prices, ATR_PERIOD)
     roc_20 = calculate_roc(all_prices, ROC_CRASH_PERIOD)
+    trend_efficiency = calculate_trend_efficiency(all_prices, TREND_EFFICIENCY_PERIOD)
     donchian_high_20 = np.max(all_prices[-STOP_LOSS_LOOKBACK:]) if len(all_prices) >= STOP_LOSS_LOOKBACK else None
-    _, upper_bb, _ = calculate_bollinger_bands(all_prices, BB_PERIOD)
 
     # Null check for all indicators
-    if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_20, upper_bb]) or macd_hist_series is None or len(macd_hist_series) < 2:
+    if any(v is None for v in [sma_100, sma_50, rsi, atr, roc_20, donchian_high_20, trend_efficiency]) or macd_hist_series is None or len(macd_hist_series) < 3:
         return "HOLD"
 
     macd_histogram = macd_hist_series[-1]
     prev_macd_histogram = macd_hist_series[-2]
+    prev_macd_hist_delta = macd_hist_series[-2] - macd_hist_series[-3]
     macd_hist_delta = macd_histogram - prev_macd_histogram
 
-    # --- 3. Regime and State Detection ---
-    volatility_ratio = short_atr / long_atr if long_atr > 0 else 1.0
-    sentiment_amplifier = 1.0 + min(max(volatility_ratio - 1.0, 0.0), 1.5)
-    amplified_sentiment = net_sentiment_score * sentiment_amplifier
-
-    # Crisis Regime: General high-risk environment
+    # --- 3. Regime Detection ---
     is_long_term_downtrend = current_price < sma_100
-    is_high_volatility = volatility_ratio > 1.75
-    is_crash_velocity = roc_20 < -15.0
-    is_crisis_regime = (is_long_term_downtrend and is_high_volatility) or is_crash_velocity
+    is_crash_velocity = roc_20 is not None and roc_20 < -15.0
+    is_crisis_regime = is_long_term_downtrend or is_crash_velocity
 
-    # Capitulation Regime: An extreme subset of crisis, signaling a potential bottom
-    is_deeply_oversold = rsi < 25
-    is_extreme_crash_velocity = roc_20 < -18.0
+    is_deeply_oversold = rsi is not None and rsi < 25
+    is_extreme_crash_velocity = roc_20 is not None and roc_20 < -18.0
     is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold
 
     # --- 4. Decision Logic (Hierarchical) ---
@@ -189,7 +182,7 @@ def decide(current_price, price_history, news_context):
         return "BUY"
 
     # REGIME 2: CRISIS AVERSION
-    if is_crisis_regime:
+    if is_crisis_regime and not is_capitulation_candidate:
         if macd_histogram < 0 or current_price < sma_50:
             return "SELL"
         return "HOLD"
@@ -197,37 +190,37 @@ def decide(current_price, price_history, news_context):
     # REGIME 3: NORMAL MARKET CONDITIONS
 
     # --- SELL LOGIC (Risk Management First) ---
-    # Priority 1: Adaptive ATR Trailing Stop-Loss.
-    if current_price < (donchian_high_20 - (ATR_STOP_MULTIPLIER * short_atr)):
+    # Priority 1: Dynamic Volatility Stop-Loss (Chandelier Exit)
+    chandelier_exit = donchian_high_20 - (3 * atr)
+    if current_price < chandelier_exit:
         return "SELL"
 
     # Priority 2: Standard trend breakdown signal.
     is_primary_downtrend = current_price < sma_50
     is_momentum_confirming_down = macd_histogram < 0 and prev_macd_histogram >= 0
-    is_sentiment_permissive_for_sell = amplified_sentiment < 3.0
-    if is_primary_downtrend and is_momentum_confirming_down and is_sentiment_permissive_for_sell:
+    if is_primary_downtrend and is_momentum_confirming_down and net_sentiment_score < 3.0:
         return "SELL"
 
-    # Priority 3: Profit-taking on overbought conditions with FADING momentum.
+    # Priority 3: Profit-taking on extreme overbought conditions with FADING momentum.
     is_momentum_fading = macd_hist_delta < 0
-    is_overbought = rsi > 78
-    if is_overbought and is_momentum_fading:
+    is_extremely_overbought = rsi > 82
+    if is_extremely_overbought and is_momentum_fading:
         return "SELL"
 
     # --- BUY LOGIC ---
     is_primary_uptrend = current_price > sma_50
-    is_not_overbought = rsi < 75
-    is_sentiment_permissive_for_buy = amplified_sentiment > -3.0
+    is_not_overbought = rsi < 78
+    is_sentiment_permissive = net_sentiment_score > -3.0
+    is_trending_market = trend_efficiency > 0.4 # Filter for non-choppy markets
 
-    # BUY Condition 1: Standard Momentum Entry (MACD Crossover)
-    is_momentum_confirming_up = macd_histogram > 0 and prev_macd_histogram <= 0
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy:
-        return "BUY"
+    # Condition A: Classic momentum crossover
+    buy_signal_crossover = macd_histogram > 0 and prev_macd_histogram <= 0
 
-    # BUY Condition 2: Volatility Breakout Entry (Bollinger Band Break)
-    is_volatility_expanding = volatility_ratio > 1.25
-    is_breaking_upper_band = current_price > upper_bb
-    if is_primary_uptrend and is_breaking_upper_band and is_volatility_expanding and is_not_overbought and is_sentiment_permissive_for_buy:
+    # Condition B: Pullback entry in an established uptrend
+    is_pullback_reversal = macd_histogram > 0.1 * atr and macd_hist_delta > 0 and prev_macd_hist_delta <= 0
+    buy_signal_pullback = is_primary_uptrend and is_pullback_reversal and rsi > 45
+
+    if (buy_signal_crossover or buy_signal_pullback) and is_not_overbought and is_sentiment_permissive and is_trending_market:
         return "BUY"
 
     # Default action is to hold the current position.
