@@ -153,7 +153,7 @@ def calculate_sentiment_score(news_context):
             if any(neg_word in post_context for neg_word in negation_words):
                 is_negated = not is_negated
             if is_negated:
-                weight *= 0.05  # Aggressive reduction for negated terms
+                weight *= 0.2  # Reduced negation impact from 0.05 to 0.2
             net_sentiment_score += -weight if is_negated else weight
     return net_sentiment_score
 
@@ -214,7 +214,7 @@ def decide(current_price, price_history, news_context):
 
     is_long_term_downtrend = current_price < sma_200 if sma_200 is not None else False
     is_crash_velocity = roc_20 < -18.0
-    is_crisis_regime = (is_long_term_downtrend and is_high_volatility) or is_crash_velocity or ("yield curve inversion" in context_lower) or "banking crisis" in context_lower or "sovereign debt" in context_lower
+    is_crisis_regime = (is_long_term_downtrend and is_high_volatility) or is_crash_velocity or ("yield curve inversion" in context_lower) or "banking crisis" in context_lower or "sovereign debt" in context_lower or "financial crisis" in context_lower
 
     is_deeply_oversold = rsi < 25
     is_extreme_crash_velocity = roc_20 < -22.0
