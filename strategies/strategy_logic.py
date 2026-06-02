@@ -13,88 +13,67 @@ def calculate_ema_series(data, period):
         import pandas as pd
         return pd.Series(data_arr).ewm(span=period, adjust=False).mean().to_numpy()
     except ImportError:
-        ema_values = np.zeros_like(data_arr)
+        ema_values = np.zeros(len(data_arr), dtype=float)
         ema_values[period-1] = np.mean(data_arr[:period])
         multiplier = 2 / (period + 1)
         for i in range(period, len(data_arr)):
             ema_values[i] = (data_arr[i] - ema_values[i-1]) * multiplier + ema_values[i-1]
         return ema_values[period-1:]
 
-def calculate_sma(prices, period):
-    """Calculates the Simple Moving Average (SMA) for the latest price."""
-    if len(prices) < period:
-        return None
-    return np.mean(prices[-period:])
-
-def calculate_rsi_series(prices, period=14):
-    """Calculates a full series of Relative Strength Index (RSI) values."""
-    if len(prices) < period + 1:
+def calculate_sma_series(data, period):
+    """Calculates a full series of Simple Moving Averages."""
+    if len(data) < period:
         return np.array([])
+    data_arr = np.array(data, dtype=float)
+    try:
+        import pandas as pd
+        return pd.Series(data_arr).rolling(window=period).mean().to_numpy()
+    except ImportError:
+        sma_values = np.zeros(len(data_arr) - period + 1, dtype=float)
+        for i in range(len(sma_values)):
+            sma_values[i] = np.mean(data_arr[i:i+period])
+        return sma_values
+
+def calculate_rsi(prices, period=14):
+    """Calculates the Relative Strength Index (RSI) using Wilder's smoothing method."""
+    if len(prices) < period + 1:
+        return None
     prices_arr = np.array(prices, dtype=float)
     deltas = np.diff(prices_arr)
-    gains = np.where(deltas >= 0, deltas, 0.0)
-    losses = np.where(deltas < 0, -deltas, 0.0)
-    
-    avg_gain = np.mean(gains[:period])
-    avg_loss = np.mean(losses[:period])
-    
-    rsi_values = np.zeros(len(prices) - period)
-    
-    if avg_loss == 0:
-        rs = 100.0
-    else:
-        rs = avg_gain / avg_loss
-    rsi_values[0] = 100.0 - (100.0 / (1.0 + rs))
-
+    seed_gains = deltas[:period][deltas[:period] >= 0].sum()
+    seed_losses = -deltas[:period][deltas[:period] < 0].sum()
+    avg_gain = seed_gains / period
+    avg_loss = seed_losses / period
     for i in range(period, len(deltas)):
-        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
-        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
-        if avg_loss == 0:
-            rs = 100.0
-        else:
-            rs = avg_gain / avg_loss
-        rsi_values[i - period + 1] = 100.0 - (100.0 / (1.0 + rs))
-        
-    return rsi_values
-
-def calculate_stoch_rsi(prices, rsi_period=14, stoch_period=14, k_period=3):
-    """Calculates the Stochastic RSI %K value."""
-    rsi_series = calculate_rsi_series(prices, rsi_period)
-    if len(rsi_series) < stoch_period:
-        return None
-    
-    stoch_rsi_values = np.zeros(len(rsi_series) - stoch_period + 1)
-    for i in range(stoch_period - 1, len(rsi_series)):
-        rsi_window = rsi_series[i - stoch_period + 1 : i + 1]
-        min_rsi = np.min(rsi_window)
-        max_rsi = np.max(rsi_window)
-        if max_rsi == min_rsi:
-            stoch_rsi_values[i - stoch_period + 1] = 100.0
-        else:
-            stoch_rsi_values[i - stoch_period + 1] = (rsi_series[i] - min_rsi) / (max_rsi - min_rsi) * 100.0
-            
-    if len(stoch_rsi_values) < k_period:
-        return None
-        
-    # Calculate %K as a simple moving average of the StochRSI values
-    k_value = np.mean(stoch_rsi_values[-k_period:])
-    return k_value / 100.0 # Normalize to 0-1 range
+        delta = deltas[i]
+        gain = delta if delta >= 0 else 0.0
+        loss = -delta if delta < 0 else 0.0
+        avg_gain = (avg_gain * (period - 1) + gain) / period
+        avg_loss = (avg_loss * (period - 1) + loss) / period
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return 100.0 - (100.0 / (1.0 + rs))
 
 def calculate_macd_series(prices, short_period=12, long_period=26, signal_period=9):
     """Calculates the MACD line, signal line, and histogram series."""
     if len(prices) < long_period:
         return None, None, None
-    short_ema_full = calculate_ema_series(prices, short_period)
-    long_ema_full = calculate_ema_series(prices, long_period)
+    # Ensure full series are returned for alignment
+    full_short_ema = calculate_ema_series(prices, short_period)
+    full_long_ema = calculate_ema_series(prices, long_period)
     
-    # Align series by taking the tail of the shorter period EMA
-    macd_line = short_ema_full[-len(long_ema_full):] - long_ema_full
+    # Align series by taking the tail of the shorter period's EMA
+    macd_line = full_short_ema[long_period-short_period:] - full_long_ema
     
     if len(macd_line) < signal_period:
         return macd_line, None, None
-        
+    
+    # Pass only the MACD line to the EMA function
     signal_line = calculate_ema_series(macd_line, signal_period)
-    histogram = macd_line[-len(signal_line):] - signal_line
+    
+    # Align histogram
+    histogram = macd_line[len(macd_line)-len(signal_line):] - signal_line
     return macd_line, signal_line, histogram
 
 def calculate_atr(prices, period=14):
@@ -103,8 +82,17 @@ def calculate_atr(prices, period=14):
         return None
     prices_arr = np.array(prices, dtype=float)
     price_ranges = np.abs(np.diff(prices_arr))
-    atr_series = calculate_ema_series(price_ranges, period)
-    return atr_series[-1] if len(atr_series) > 0 else None
+    # Use EMA for ATR smoothing
+    try:
+        import pandas as pd
+        atr_series = pd.Series(price_ranges).ewm(alpha=1/period, adjust=False).mean().to_numpy()
+        return atr_series[-1] if len(atr_series) > 0 else None
+    except ImportError:
+        # Fallback calculation if pandas is not available
+        atr_val = np.mean(price_ranges[:period])
+        for i in range(period, len(price_ranges)):
+            atr_val = ((atr_val * (period - 1)) + price_ranges[i]) / period
+        return atr_val
 
 def calculate_roc(prices, period=20):
     """Calculates the Rate of Change (ROC) over a given period."""
@@ -116,54 +104,35 @@ def decide(current_price, price_history, news_context):
     """
     SELF-IMPROVED STRATEGY V3:
     This version enhances the successful V2 strategy with three key upgrades:
-    1.  Dynamic ATR Stop-Loss: Replaces the static 7% stop-loss with a dynamic,
-        volatility-adjusted stop based on the Average True Range (ATR). This
-        adapts risk management to current market conditions, tightening during
-        calm periods and loosening during volatility.
-    2.  Stochastic RSI for Precision: Integrates the Stochastic RSI oscillator
-        to provide more sensitive and timely overbought/oversold signals,
-        improving entry/exit precision compared to using RSI alone.
-    3.  Sentiment Circuit Breaker: Introduces a high-conviction sentiment
-        override. Extremely negative news can now trigger a defensive SELL,
-        acting as a circuit breaker against unforeseen "black swan" events.
+    1.  Dynamic Volatility Stop-Loss: Replaces the fixed percentage stop with a
+        Chandelier Exit (Highest High - N * ATR). This adapts risk management to
+        current market volatility, tightening stops in calm markets and loosening
+        them in volatile ones to avoid premature exits.
+    2.  Trend Strength Confirmation: Introduces a filter based on the slope of the
+        50-day SMA. A BUY signal now requires the underlying trend itself to be
+        accelerating upwards, effectively filtering out entries in choppy,
+        sideways markets where price may cross the SMA without true momentum.
+    3.  Sentiment Veto System: Elevates sentiment analysis from a simple score
+        modifier to a potential veto. Extremely negative news can now block new
+        BUY signals, and overwhelmingly positive news can block non-stop-loss SELL
+        signals, preventing trades against a powerful narrative.
     """
-    # --- 1. Strategy Parameters ---
-    # Trend
-    SMA_TREND_LONG = 100
-    SMA_TREND_MEDIUM = 50
-    # Momentum
-    RSI_PERIOD = 14
-    STOCH_RSI_PERIOD = 14
-    STOCH_K_PERIOD = 3
-    ROC_CRASH_PERIOD = 20
-    # Volatility & Risk
-    ATR_SHORT = 10
-    ATR_LONG = 50
-    STOP_LOSS_LOOKBACK = 20
-    ATR_STOP_MULTIPLIER = 3.0
-    # Thresholds
-    RSI_CAPITULATION = 25
-    ROC_CRASH_VELOCITY = -18.0
-    STOCH_RSI_OVERBOUGHT = 0.90
-    STOCH_RSI_OVERSOLD = 0.15
-    SENTIMENT_SELL_OVERRIDE = -8.0
-
-    # --- 2. Sentiment Analysis ---
+    # --- 1. Sentiment Analysis ---
     context_lower = news_context.lower()
     sentiment_keywords = {
         "fed pivot": 3.0, "rate cut": 2.5, "quantitative easing": 2.5, "soft landing": 2.5,
-        "disinflation": 2.5, "cooling inflation": 2.5, "cpi miss": 2.5, "ai boom": 2.5,
-        "stimulus": 2.0, "dovish": 2.0, "record high": 2.0, "bullish": 2.0,
-        "strong earnings": 2.0, "beat estimates": 1.5, "recovery": 1.5,
-        "de-escalation": 2.0, "short squeeze": 3.5, "capitulation": 3.0,
-        "panic selling": 2.5, "extreme fear": 2.0,
+        "cooling inflation": 2.5, "cpi miss": 2.5, "ai boom": 2.5, "stimulus": 2.0,
+        "dovish": 2.0, "record high": 2.0, "bullish": 2.0, "strong earnings": 2.0,
+        "beat estimates": 1.5, "recovery": 1.5, "upgrade": 1.5, "de-escalation": 2.0,
+        "short squeeze": 3.5, "capitulation": 3.0, "panic selling": 2.5, "extreme fear": 2.0,
+        "strong jobs report": 0.5,
         "recession": -3.0, "crisis": -3.0, "stagflation": -3.0, "hot inflation": -3.0,
         "war": -3.0, "yield curve inversion": -3.5, "quantitative tightening": -2.5,
         "black swan": -4.0, "systemic risk": -4.0, "contagion": -3.5, "credit crunch": -3.5,
-        "rate hike": -2.5, "bankruptcy": -2.5, "hard landing": -2.5, "geopolitical tensions": -2.5,
+        "rate hike": -2.5, "bankruptcy": -2.5, "hard landing": -2.5, "geopolitical risk": -2.5,
         "cpi beat": -2.5, "vix spike": -2.5, "hawkish": -2.0, "bearish": -2.0,
-        "sell-off": -2.0, "weak earnings": -2.0, "market turmoil": -2.0,
-        "supply chain disruption": -2.5, "uncertainty": -1.5,
+        "sell-off": -2.0, "weak earnings": -2.0, "market turmoil": -2.0, "bubble": -2.0,
+        "uncertainty": -1.5,
         "euphoria": -2.5, "mania": -3.0, "irrational exuberance": -3.0, "extreme greed": -2.5,
     }
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent"]
@@ -175,86 +144,97 @@ def decide(current_price, price_history, news_context):
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
             net_sentiment_score += -weight if is_negated else weight
 
-    # --- 3. Technical Indicators & State Calculation ---
+    # --- 2. Technical Indicators & State Calculation ---
     all_prices = price_history + [current_price]
-    required_history_length = max(SMA_TREND_LONG + 1, ATR_LONG + 1, RSI_PERIOD + STOCH_RSI_PERIOD + STOCH_K_PERIOD)
+
+    # Indicator Periods
+    SMA_TREND_LONG = 100
+    SMA_TREND_MEDIUM = 50
+    RSI_PERIOD = 14
+    ATR_PERIOD = 14
+    ROC_CRASH_PERIOD = 20
+    STOP_LOSS_LOOKBACK = 22
+    ATR_STOP_MULTIPLIER = 3.0
+    SMA_SLOPE_PERIOD = 5
+
+    required_history_length = max(SMA_TREND_LONG + SMA_SLOPE_PERIOD, 50)
     if len(all_prices) < required_history_length:
         return "HOLD"
 
     # Calculate core indicators
-    sma_100 = calculate_sma(all_prices, SMA_TREND_LONG)
-    sma_50 = calculate_sma(all_prices, SMA_TREND_MEDIUM)
-    rsi = calculate_rsi_series(all_prices, RSI_PERIOD)[-1] if len(calculate_rsi_series(all_prices, RSI_PERIOD)) > 0 else 50.0
-    stoch_rsi_k = calculate_stoch_rsi(all_prices, RSI_PERIOD, STOCH_RSI_PERIOD, STOCH_K_PERIOD)
+    sma_100_series = calculate_sma_series(all_prices, SMA_TREND_LONG)
+    sma_50_series = calculate_sma_series(all_prices, SMA_TREND_MEDIUM)
+    rsi = calculate_rsi(all_prices, RSI_PERIOD)
     _, _, macd_hist_series = calculate_macd_series(all_prices)
-    short_atr = calculate_atr(all_prices, ATR_SHORT)
-    long_atr = calculate_atr(all_prices, ATR_LONG)
+    atr = calculate_atr(all_prices, ATR_PERIOD)
     roc_20 = calculate_roc(all_prices, ROC_CRASH_PERIOD)
-    donchian_high_20 = np.max(all_prices[-STOP_LOSS_LOOKBACK:])
+    donchian_high_22 = np.max(all_prices[-STOP_LOSS_LOOKBACK:]) if len(all_prices) >= STOP_LOSS_LOOKBACK else None
 
     # Null check for all indicators
-    if any(v is None for v in [sma_100, sma_50, rsi, stoch_rsi_k, short_atr, long_atr, roc_20]) or macd_hist_series is None or len(macd_hist_series) < 2:
+    if any(v is None for v in [rsi, atr, roc_20, donchian_high_22]) or macd_hist_series is None or len(macd_hist_series) < 2 or len(sma_50_series) < SMA_SLOPE_PERIOD or len(sma_100_series) < 1:
         return "HOLD"
 
+    # Derive state variables from indicators
+    current_sma_100 = sma_100_series[-1]
+    current_sma_50 = sma_50_series[-1]
+    sma_50_slope = current_sma_50 - sma_50_series[-SMA_SLOPE_PERIOD]
     macd_histogram = macd_hist_series[-1]
     prev_macd_histogram = macd_hist_series[-2]
     macd_hist_delta = macd_histogram - prev_macd_histogram
 
-    # --- 4. Regime Detection ---
-    is_long_term_downtrend = current_price < sma_100
-    is_high_volatility = short_atr > (long_atr * 1.75)
+    # --- 3. Regime & Sentiment State Detection ---
+    is_long_term_downtrend = current_price < current_sma_100
     is_crash_velocity = roc_20 < -15.0
-    is_crisis_regime = (is_long_term_downtrend and is_high_volatility) or is_crash_velocity
-    is_capitulation_candidate = (roc_20 < ROC_CRASH_VELOCITY) and (rsi < RSI_CAPITULATION)
+    is_crisis_regime = is_long_term_downtrend or is_crash_velocity
 
-    # --- 5. Decision Logic (Hierarchical) ---
+    is_deeply_oversold = rsi < 25
+    is_extreme_crash_velocity = roc_20 < -18.0
+    is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold
 
-    # PRIORITY 0: SENTIMENT CIRCUIT BREAKER
-    if net_sentiment_score < SENTIMENT_SELL_OVERRIDE:
-        return "SELL"
+    # Sentiment Veto States
+    has_sentiment_veto_buy = net_sentiment_score <= -3.5
+    has_sentiment_veto_sell = net_sentiment_score >= 3.5
+
+    # --- 4. Decision Logic (Hierarchical) ---
 
     # REGIME 1: CONTRARIAN CAPITULATION (HIGHEST PRIORITY)
-    if is_capitulation_candidate and macd_hist_delta > 0:
+    if is_capitulation_candidate and macd_hist_delta > 0 and not has_sentiment_veto_buy:
         return "BUY"
 
-    # REGIME 2: CRISIS AVERSION
+    # REGIME 2: DYNAMIC RISK MANAGEMENT (SECOND HIGHEST PRIORITY)
+    # Chandelier Exit: Sell if price closes below the highest high of the last N days minus a multiple of ATR.
+    chandelier_exit_price = donchian_high_22 - (ATR_STOP_MULTIPLIER * atr)
+    if current_price < chandelier_exit_price:
+        return "SELL"
+
+    # REGIME 3: CRISIS AVERSION
     if is_crisis_regime:
-        if macd_histogram < 0 or current_price < sma_50:
+        if macd_histogram < 0 or current_price < current_sma_50:
             return "SELL"
         return "HOLD"
 
-    # REGIME 3: NORMAL MARKET CONDITIONS
+    # REGIME 4: NORMAL MARKET CONDITIONS
 
-    # --- SELL LOGIC (Risk Management First) ---
-    # Priority 1: Dynamic ATR Stop-Loss.
-    stop_price = donchian_high_20 - (ATR_STOP_MULTIPLIER * short_atr)
-    if current_price < stop_price:
-        return "SELL"
-
-    # Priority 2: Standard trend breakdown signal.
-    is_primary_downtrend = current_price < sma_50
+    # --- SELL LOGIC ---
+    # Priority 1: Trend breakdown signal.
+    is_primary_downtrend = current_price < current_sma_50
     is_momentum_confirming_down = macd_histogram < 0 and prev_macd_histogram >= 0
-    if is_primary_downtrend and is_momentum_confirming_down:
+    if is_primary_downtrend and is_momentum_confirming_down and not has_sentiment_veto_sell:
         return "SELL"
 
-    # Priority 3: Profit-taking on extreme overbought conditions with FADING momentum.
+    # Priority 2: Profit-taking on overbought conditions with FADING momentum.
     is_momentum_fading = macd_hist_delta < 0
-    is_stoch_rsi_overbought = stoch_rsi_k > STOCH_RSI_OVERBOUGHT
-    if is_stoch_rsi_overbought and is_momentum_fading:
+    is_extremely_overbought = rsi > 80
+    if is_extremely_overbought and is_momentum_fading and not has_sentiment_veto_sell:
         return "SELL"
 
     # --- BUY LOGIC ---
-    is_primary_uptrend = current_price > sma_50
+    is_primary_uptrend = current_price > current_sma_50
     is_momentum_confirming_up = macd_histogram > 0 and prev_macd_histogram <= 0
-    is_stoch_rsi_not_overbought = stoch_rsi_k < STOCH_RSI_OVERBOUGHT
-    is_pullback_in_uptrend = stoch_rsi_k < STOCH_RSI_OVERSOLD # Optional: buy dips
+    is_trend_strength_confirmed = sma_50_slope > 0 # Ensure the MA itself is trending up
+    is_not_overbought = rsi < 75
 
-    # Primary Buy Signal: Trend and momentum alignment, not overbought.
-    if is_primary_uptrend and is_momentum_confirming_up and is_stoch_rsi_not_overbought:
-        return "BUY"
-    
-    # Secondary Buy Signal: Buy a small dip (oversold StochRSI) within a strong primary uptrend.
-    if is_primary_uptrend and macd_histogram > 0 and is_pullback_in_uptrend:
+    if is_primary_uptrend and is_momentum_confirming_up and is_trend_strength_confirmed and is_not_overbought and not has_sentiment_veto_buy:
         return "BUY"
 
     # Default action is to hold the current position.
