@@ -16,6 +16,7 @@ def calculate_ema_series(data, period):
     except ImportError:
         # Fallback pure-python EMA calculation
         ema_values = np.zeros(len(data_arr) - period + 1, dtype=float)
+        # Initialize the first EMA with a simple moving average
         ema_values[0] = np.mean(data_arr[:period])
         multiplier = 2 / (period + 1)
         for i in range(1, len(ema_values)):
@@ -34,18 +35,23 @@ def calculate_rsi(prices, period=14):
         return None
     prices_arr = np.array(prices, dtype=float)
     deltas = np.diff(prices_arr)
+
+    # Initial average gain and loss over the first 'period'
     seed_gains = deltas[:period][deltas[:period] >= 0].sum()
     seed_losses = -deltas[:period][deltas[:period] < 0].sum()
     avg_gain = seed_gains / period
     avg_loss = seed_losses / period
+
+    # Wilder's smoothing for subsequent periods
     for i in range(period, len(deltas)):
         delta = deltas[i]
         gain = delta if delta >= 0 else 0.0
         loss = -delta if delta < 0 else 0.0
         avg_gain = (avg_gain * (period - 1) + gain) / period
         avg_loss = (avg_loss * (period - 1) + loss) / period
+
     if avg_loss == 0:
-        return 100.0
+        return 100.0 if avg_gain > 0 else 50.0 # If no losses, RSI is 100. If no gains and no losses, it's neutral.
     rs = avg_gain / avg_loss
     return 100.0 - (100.0 / (1.0 + rs))
 
@@ -53,49 +59,73 @@ def calculate_macd_series(prices, short_period=12, long_period=26, signal_period
     """Calculates the MACD line, signal line, and histogram series."""
     if len(prices) < long_period:
         return None, None, None
+    
+    # Ensure enough data for EMA calculations
+    if len(prices) < long_period + short_period - 1: # Minimum for both EMAs to start
+        return None, None, None
+
     short_ema_series = calculate_ema_series(prices, short_period)
     long_ema_series = calculate_ema_series(prices, long_period)
-    macd_line = short_ema_series[len(short_ema_series)-len(long_ema_series):] - long_ema_series
+
+    # MACD line is the difference between the two EMAs.
+    # Align the series by taking the latest common length.
+    min_len = min(len(short_ema_series), len(long_ema_series))
+    macd_line = short_ema_series[-min_len:] - long_ema_series[-min_len:]
+
     if len(macd_line) < signal_period:
-        return macd_line, None, None
+        return macd_line, np.array([]), np.array([]) # Not enough data for signal line yet
+
     signal_line = calculate_ema_series(macd_line, signal_period)
-    histogram = macd_line[len(macd_line)-len(signal_line):] - signal_line
+    
+    # Histogram is MACD line minus Signal line. Align again.
+    min_len_hist = min(len(macd_line), len(signal_line))
+    histogram = macd_line[-min_len_hist:] - signal_line[-min_len_hist:]
+    
     return macd_line, signal_line, histogram
 
 def calculate_atr(prices, period=14):
     """Calculates Average True Range (ATR) using close-to-close volatility."""
-    if len(prices) < period + 1:
+    if len(prices) < period + 1: # Need at least period + 1 prices to calculate first TR
         return None
-    prices_arr = np.array(prices, dtype=float)
-    price_ranges = np.abs(np.diff(prices_arr))
-    atr_series = calculate_ema_series(price_ranges, period)
+    
+    # True Range (TR) calculation
+    true_ranges = []
+    for i in range(1, len(prices)):
+        high_low = abs(prices[i] - prices[i-1]) # Simplified: using close-to-close for volatility
+        true_ranges.append(high_low)
+    
+    # ATR is the EMA of True Ranges
+    atr_series = calculate_ema_series(true_ranges, period)
     return atr_series[-1] if len(atr_series) > 0 else None
 
 def calculate_roc(prices, period=20):
     """Calculates the Rate of Change (ROC) over a given period."""
     if len(prices) < period + 1:
         return None
+    # ROC = ((Current Price - Price 'period' periods ago) / Price 'period' periods ago) * 100
     return ((prices[-1] - prices[-1 - period]) / prices[-1 - period]) * 100
 
 def decide(current_price, price_history, news_context):
     """
     SELF-IMPROVED STRATEGY V3:
-    This version addresses the "extremely low trade count" feedback by enhancing trade frequency
-    in normal market conditions, while retaining the robust risk management and high-conviction
-    signals of the parent strategy.
+    This version builds upon the successful V2 by addressing the primary limitation of low trade count
+    and aiming for improved performance in normal market conditions, while preserving its strength
+    in crisis regimes.
 
-    Key enhancements:
-    1.  Introduced a shorter-term SMA (20-day) to identify more frequent trend signals.
-    2.  Expanded BUY logic in normal conditions: Now allows entries on established short-term
-        uptrends with positive MACD histogram and reasonable RSI, in addition to the original
-        MACD crossover signal. This aims to capture more sustained upward movements.
-    3.  Expanded SELL logic in normal conditions: Added a condition to exit positions when
-        the price falls below the 20-day SMA and MACD histogram is negative, allowing for
-        quicker exits on short-term trend reversals.
-    4.  Maintained the high-priority Contrarian Capitulation BUY, Crisis Aversion, and
-        Dynamic Stop-Loss mechanisms for capital preservation and high-conviction entries.
-    5.  Sentiment analysis and its thresholds remain unchanged, as they proved effective
-        as confirmatory filters.
+    Key Enhancements:
+    1.  **Relaxed Sentiment for Capitulation Buy:** The highest-conviction "buy the dip" signal
+        (extreme ROC decline, low RSI, momentum turning positive) no longer requires a positive
+        sentiment score. During true capitulation, news is inherently negative, and this change
+        ensures the strategy can enter at absolute bottoms without being blocked by overwhelming
+        negative sentiment.
+    2.  **New "Pullback Buy" in Uptrends:** Introduces a more frequent buy signal for normal markets.
+        It identifies pullbacks (RSI < 45) within an established uptrend (above SMA_50) when
+        momentum (MACD histogram) shows signs of turning upwards, aiming to capitalize on healthy
+        dips.
+    3.  **More Sensitive Profit-Taking:** The "SELL" condition for overbought markets is adjusted
+        to trigger at a lower RSI threshold (RSI > 70, from 82) when momentum is fading. This
+        allows for quicker profit realization and potentially increases trade frequency by
+        exiting overextended positions sooner.
     """
     # --- 1. Sentiment Analysis ---
     context_lower = news_context.lower()
@@ -130,21 +160,25 @@ def decide(current_price, price_history, news_context):
     # Indicator Periods
     SMA_TREND_LONG = 100
     SMA_TREND_MEDIUM = 50
-    SMA_TREND_SHORT = 20 # NEW: Shorter-term SMA
     RSI_PERIOD = 14
     ATR_SHORT = 10
     ATR_LONG = 50
     ROC_CRASH_PERIOD = 20
     STOP_LOSS_LOOKBACK = 20
 
-    required_history_length = max(SMA_TREND_LONG + 1, ATR_LONG + 1, ROC_CRASH_PERIOD + 1, SMA_TREND_SHORT + 1, 50)
+    # Ensure sufficient history for all indicators
+    # MACD requires long_period + signal_period - 1 for histogram to be meaningful
+    # RSI needs period + 1
+    # ATR needs period + 1
+    # ROC needs period + 1
+    # SMA needs period
+    required_history_length = max(SMA_TREND_LONG, ATR_LONG + 1, ROC_CRASH_PERIOD + 1, 26 + 9 - 1 + 1) # 26+9-1 for MACD histogram, +1 for current price
     if len(all_prices) < required_history_length:
         return "HOLD"
 
     # Calculate core indicators
     sma_100 = calculate_sma(all_prices, SMA_TREND_LONG)
     sma_50 = calculate_sma(all_prices, SMA_TREND_MEDIUM)
-    sma_20 = calculate_sma(all_prices, SMA_TREND_SHORT) # NEW
     rsi = calculate_rsi(all_prices, RSI_PERIOD)
     _, _, macd_hist_series = calculate_macd_series(all_prices)
     short_atr = calculate_atr(all_prices, ATR_SHORT)
@@ -153,12 +187,13 @@ def decide(current_price, price_history, news_context):
     donchian_high_20 = np.max(all_prices[-STOP_LOSS_LOOKBACK:]) if len(all_prices) >= STOP_LOSS_LOOKBACK else None
 
     # Null check for all indicators
-    if any(v is None for v in [sma_100, sma_50, sma_20, rsi, short_atr, long_atr, roc_20, donchian_high_20]) or macd_hist_series is None or len(macd_hist_series) < 2:
+    # macd_hist_series needs at least 2 elements for macd_hist_delta
+    if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_20]) or macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
 
     macd_histogram = macd_hist_series[-1]
     prev_macd_histogram = macd_hist_series[-2]
-    macd_hist_delta = macd_histogram - prev_macd_histogram
+    macd_hist_delta = macd_histogram - prev_macd_histogram # Change in MACD histogram (momentum velocity)
 
     # --- 3. Regime Detection ---
     # Crisis Regime: General high-risk environment
@@ -176,6 +211,7 @@ def decide(current_price, price_history, news_context):
 
     # REGIME 1: CONTRARIAN CAPITULATION (HIGHEST PRIORITY)
     # Buy when there is blood in the streets, but only if momentum shows signs of turning.
+    # Removed sentiment filter here to allow entry during extreme negative news.
     if is_capitulation_candidate and macd_hist_delta > 0:
         return "BUY"
 
@@ -193,36 +229,34 @@ def decide(current_price, price_history, news_context):
     if current_price < (donchian_high_20 * 0.93):
         return "SELL"
 
-    # Priority 2: Standard trend breakdown signal OR shorter-term trend reversal.
+    # Priority 2: Standard trend breakdown signal.
     is_primary_downtrend = current_price < sma_50
-    is_short_term_downtrend = current_price < sma_20 # NEW
-    is_momentum_confirming_down = macd_histogram < 0 and prev_macd_histogram >= 0
-    is_momentum_already_negative = macd_histogram < 0 # NEW
+    is_momentum_confirming_down = macd_histogram < 0 and prev_macd_histogram >= 0 # MACD histogram crosses zero downwards
     is_sentiment_permissive_for_sell = net_sentiment_score < 3.0
-
-    if (is_primary_downtrend and is_momentum_confirming_down and is_sentiment_permissive_for_sell) or \
-       (is_short_term_downtrend and is_momentum_already_negative and is_sentiment_permissive_for_sell): # NEW condition added
+    if is_primary_downtrend and is_momentum_confirming_down and is_sentiment_permissive_for_sell:
         return "SELL"
 
-    # Priority 3: Profit-taking on extreme overbought conditions with FADING momentum.
+    # Priority 3: Profit-taking on overbought conditions with FADING momentum.
     is_momentum_fading = macd_hist_delta < 0
-    is_extremely_overbought = rsi > 82
-    if is_extremely_overbought and is_momentum_fading:
+    is_overbought_for_profit_taking = rsi > 70 # Adjusted from 82 to 70 for more sensitive profit-taking
+    if is_overbought_for_profit_taking and is_momentum_fading:
         return "SELL"
 
     # --- BUY LOGIC ---
     is_primary_uptrend = current_price > sma_50
-    is_short_term_uptrend = current_price > sma_20 # NEW
-    is_momentum_confirming_up = macd_histogram > 0 and prev_macd_histogram <= 0
-    is_momentum_already_positive = macd_histogram > 0 # NEW
-    is_not_overbought_primary = rsi < 78
-    is_not_overbought_secondary = rsi < 70 # NEW: Slightly tighter for the new buy signal
+    is_momentum_confirming_up = macd_histogram > 0 and prev_macd_histogram <= 0 # MACD histogram crosses zero upwards
+    is_not_overbought_for_entry = rsi < 78 # Still conservative for initial entry
     is_sentiment_permissive_for_buy = net_sentiment_score > -3.0
     is_sufficient_volatility = short_atr > (long_atr * 0.6) # Avoids entering dead, sideways markets.
 
-    # Original high-conviction buy OR new, more frequent buy signal
-    if (is_primary_uptrend and is_momentum_confirming_up and is_not_overbought_primary and is_sentiment_permissive_for_buy and is_sufficient_volatility) or \
-       (is_short_term_uptrend and is_momentum_already_positive and is_not_overbought_secondary and is_sentiment_permissive_for_buy and is_sufficient_volatility): # NEW condition added
+    # Existing Trend-Following Buy
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought_for_entry and is_sentiment_permissive_for_buy and is_sufficient_volatility:
+        return "BUY"
+
+    # NEW: Pullback Buy in an Uptrend (to increase trade frequency in normal markets)
+    is_pullback_oversold = rsi < 45 # RSI indicates a significant pullback, but not extreme oversold like capitulation
+    is_momentum_recovering_from_dip = macd_hist_delta > 0 # Momentum turning positive after a dip
+    if is_primary_uptrend and is_pullback_oversold and is_momentum_recovering_from_dip and is_sentiment_permissive_for_buy:
         return "BUY"
 
     # Default action is to hold the current position.
