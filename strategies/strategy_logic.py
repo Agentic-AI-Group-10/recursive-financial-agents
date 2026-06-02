@@ -127,21 +127,25 @@ def calculate_ema(prices, period):
         return None
     return calculate_ema_series(prices, period)[-1]
 
-def calculate_macd_trend(prices, short_period=12, long_period=26):
-    """Calculates the MACD-like trend."""
-    short_ema_series = calculate_ema_series(prices, short_period)
-    long_ema_series = calculate_ema_series(prices, long_period)
-    return short_ema_series[len(short_ema_series)-len(long_ema_series):]
+def calculate_keltner_channel(prices, period=20):
+    """Calculates the Keltner Channel."""
+    if len(prices) < period:
+        return None, None
+    sma = calculate_sma(prices, period)
+    atr = calculate_atr(prices, period)
+    upper_band = sma + (atr * 2)
+    lower_band = sma - (atr * 2)
+    return upper_band, lower_band
 
-def calculate_rsi_trend(prices, period=14):
-    """Calculates the RSI-like trend."""
-    rsi_values = calculate_rsi(prices, period)
-    return rsi_values[len(rsi_values)-1]
-
-def calculate_atr_trend(prices, period=14):
-    """Calculates the ATR-like trend."""
-    atr_series = calculate_atr(prices, period)
-    return atr_series[-1] if len(atr_series) > 0 else None
+def calculate_donchian_channel(prices, period=20):
+    """Calculates the Donchian Channel."""
+    if len(prices) < period:
+        return None, None
+    donchian_high = np.max(prices[-period:])
+    donchian_low = np.min(prices[-period:])
+    upper_band = donchian_high
+    lower_band = donchian_low
+    return upper_band, lower_band
 
 def calculate_sentiment_score(news_context):
     """Calculates the sentiment score based on news context."""
@@ -170,9 +174,12 @@ def calculate_sentiment_score(news_context):
             pre_context = context_lower[max(0, match.start() - 30):match.start()]
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
             net_sentiment_score += -weight if is_negated else weight
+
     return net_sentiment_score
 
 def decide(current_price, price_history, news_context):
+    context_lower = news_context.lower()
+    sentiment_score = calculate_sentiment_score(news_context)
     all_prices = price_history + [current_price]
     all_volumes = [0.0] * len(price_history) + [0.0]  # Replace with actual volume data
 
@@ -199,16 +206,13 @@ def decide(current_price, price_history, news_context):
     short_atr = calculate_atr(all_prices, atr_short)
     long_atr = calculate_atr(all_prices, atr_long)
     roc_20 = calculate_roc(all_prices, roc_crash_period)
-    donchian_high_30 = np.max(all_prices[-stop_loss_lookback:]) if len(all_prices) >= stop_loss_lookback else None
+    donchian_high_30, donchian_low_30 = calculate_donchian_channel(all_prices)
     upper_band, lower_band = calculate_bollinger_bands(all_prices)
     stochastic_oscillator = calculate_stochastic_oscillator(all_prices)
     fi = calculate_force_index(all_prices, all_volumes)
-    macd_trend = calculate_macd_trend(all_prices)
-    rsi_trend = calculate_rsi_trend(all_prices)
-    atr_trend = calculate_atr_trend(all_prices)
-    sentiment_score = calculate_sentiment_score(news_context)
+    keltner_upper_band, keltner_lower_band = calculate_keltner_channel(all_prices)
 
-    if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_30, upper_band, lower_band, stochastic_oscillator, fi]) or \
+    if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, upper_band, lower_band, stochastic_oscillator, fi]) or \
        macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
 
@@ -269,8 +273,9 @@ def decide(current_price, price_history, news_context):
     is_sentiment_permissive_for_buy = sentiment_score > -3.0
     is_sufficient_volatility = short_atr > (long_atr * 0.6) 
     is_price_in_bollinger_band = current_price > lower_band and current_price < upper_band
+    is_price_in_keltner_channel = current_price > keltner_lower_band and current_price < keltner_upper_band
 
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_bollinger_band and stochastic_oscillator > 20:
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_bollinger_band and is_price_in_keltner_channel and stochastic_oscillator > 20:
         return "BUY"
 
     return "HOLD"
