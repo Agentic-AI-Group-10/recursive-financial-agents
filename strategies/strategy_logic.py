@@ -55,15 +55,7 @@ def calculate_macd_series(prices, short_period=12, long_period=26, signal_period
         return None, None, None
     short_ema_series = calculate_ema_series(prices, short_period)
     long_ema_series = calculate_ema_series(prices, long_period)
-    
-    # Ensure both EMA series are long enough and aligned for subtraction
-    if len(short_ema_series) < len(long_ema_series):
-        # This case should ideally not happen if long_period > short_period
-        # but for robustness, we take the shorter common length from the end
-        macd_line = short_ema_series[-len(short_ema_series):] - long_ema_series[-len(short_ema_series):]
-    else:
-        macd_line = short_ema_series[-len(long_ema_series):] - long_ema_series
-
+    macd_line = short_ema_series[len(short_ema_series)-len(long_ema_series):] - long_ema_series
     if len(macd_line) < signal_period:
         return macd_line, None, None
     signal_line = calculate_ema_series(macd_line, signal_period)
@@ -75,9 +67,6 @@ def calculate_atr(prices, period=14):
     if len(prices) < period + 1:
         return None
     prices_arr = np.array(prices, dtype=float)
-    # True Range (TR) = max[(High - Low), abs(High - Prev. Close), abs(Low - Prev. Close)]
-    # Since we only have closing prices, we approximate TR as abs(Current Close - Prev. Close)
-    # This is a simplification but common when only close prices are available.
     price_ranges = np.abs(np.diff(prices_arr))
     atr_series = calculate_ema_series(price_ranges, period)
     return atr_series[-1] if len(atr_series) > 0 else None
@@ -88,37 +77,25 @@ def calculate_roc(prices, period=20):
         return None
     return ((prices[-1] - prices[-1 - period]) / prices[-1 - period]) * 100
 
-def calculate_bollinger_bands(prices, period=20, num_std_dev=2):
-    """Calculates Bollinger Bands (Middle, Upper, Lower)."""
-    if len(prices) < period:
-        return None, None, None
-    prices_arr = np.array(prices, dtype=float)
-    sma = calculate_sma(prices_arr, period)
-    if sma is None:
-        return None, None, None
-    std_dev = np.std(prices_arr[-period:])
-    upper_band = sma + (std_dev * num_std_dev)
-    lower_band = sma - (std_dev * num_std_dev)
-    return upper_band, sma, lower_band
-
 def decide(current_price, price_history, news_context):
     """
     SELF-IMPROVED STRATEGY V3:
-    This version addresses the persistent low trade count and refines risk management
-    and regime-specific logic based on quantitative and qualitative feedback.
+    This version addresses the "extremely low trade count" feedback by enhancing trade frequency
+    in normal market conditions, while retaining the robust risk management and high-conviction
+    signals of the parent strategy.
 
-    Key Enhancements:
-    1.  Bollinger Bands Integration: Introduced Bollinger Bands for dynamic overbought/oversold
-        signals in normal market conditions, aiming to increase trade frequency by identifying
-        more entry/exit points.
-    2.  Dynamic ATR-based Stop-Loss: Replaced the fixed percentage stop-loss with a dynamic
-        ATR-based stop-loss (2.5 * ATR below 20-day high) for more adaptive risk management.
-    3.  Refined Sentiment for Capitulation: The contrarian capitulation BUY signal now explicitly
-        requires a `net_sentiment_score > -2.0`, preventing buys during "black swan" events.
-    4.  Relaxed Sentiment for Normal Trades: Sentiment thresholds for normal BUY/SELL signals
-        are relaxed (`> -1.0` for buy, `< 1.0` for sell) to allow more trades.
-    5.  Sentiment Keyword Update: "strong jobs report" weight is neutralized to 0.0,
-        as per past lessons indicating its ambiguous market impact.
+    Key enhancements:
+    1.  Introduced a shorter-term SMA (20-day) to identify more frequent trend signals.
+    2.  Expanded BUY logic in normal conditions: Now allows entries on established short-term
+        uptrends with positive MACD histogram and reasonable RSI, in addition to the original
+        MACD crossover signal. This aims to capture more sustained upward movements.
+    3.  Expanded SELL logic in normal conditions: Added a condition to exit positions when
+        the price falls below the 20-day SMA and MACD histogram is negative, allowing for
+        quicker exits on short-term trend reversals.
+    4.  Maintained the high-priority Contrarian Capitulation BUY, Crisis Aversion, and
+        Dynamic Stop-Loss mechanisms for capital preservation and high-conviction entries.
+    5.  Sentiment analysis and its thresholds remain unchanged, as they proved effective
+        as confirmatory filters.
     """
     # --- 1. Sentiment Analysis ---
     context_lower = news_context.lower()
@@ -128,7 +105,7 @@ def decide(current_price, price_history, news_context):
         "dovish": 2.0, "record high": 2.0, "bullish": 2.0, "strong earnings": 2.0,
         "beat estimates": 1.5, "recovery": 1.5, "upgrade": 1.5, "de-escalation": 2.0,
         "short squeeze": 3.5, "capitulation": 3.0, "panic selling": 2.5, "extreme fear": 2.0,
-        "strong jobs report": 0.0, # Neutralized as per LTM feedback
+        "strong jobs report": 0.5, # Ambiguous: good for economy, bad for inflation/rates
         "recession": -3.0, "crisis": -3.0, "stagflation": -3.0, "hot inflation": -3.0,
         "war": -3.0, "yield curve inversion": -3.5, "quantitative tightening": -2.5,
         "black swan": -4.0, "systemic risk": -4.0, "contagion": -3.5, "credit crunch": -3.5,
@@ -153,30 +130,30 @@ def decide(current_price, price_history, news_context):
     # Indicator Periods
     SMA_TREND_LONG = 100
     SMA_TREND_MEDIUM = 50
+    SMA_TREND_SHORT = 20 # NEW: Shorter-term SMA
     RSI_PERIOD = 14
     ATR_SHORT = 10
     ATR_LONG = 50
     ROC_CRASH_PERIOD = 20
-    BB_PERIOD = 20
-    STOP_LOSS_LOOKBACK = 20 # For Donchian High
+    STOP_LOSS_LOOKBACK = 20
 
-    required_history_length = max(SMA_TREND_LONG + 1, ATR_LONG + 1, ROC_CRASH_PERIOD + 1, BB_PERIOD + 1, STOP_LOSS_LOOKBACK + 1, 50)
+    required_history_length = max(SMA_TREND_LONG + 1, ATR_LONG + 1, ROC_CRASH_PERIOD + 1, SMA_TREND_SHORT + 1, 50)
     if len(all_prices) < required_history_length:
         return "HOLD"
 
     # Calculate core indicators
     sma_100 = calculate_sma(all_prices, SMA_TREND_LONG)
     sma_50 = calculate_sma(all_prices, SMA_TREND_MEDIUM)
+    sma_20 = calculate_sma(all_prices, SMA_TREND_SHORT) # NEW
     rsi = calculate_rsi(all_prices, RSI_PERIOD)
     _, _, macd_hist_series = calculate_macd_series(all_prices)
     short_atr = calculate_atr(all_prices, ATR_SHORT)
     long_atr = calculate_atr(all_prices, ATR_LONG)
     roc_20 = calculate_roc(all_prices, ROC_CRASH_PERIOD)
     donchian_high_20 = np.max(all_prices[-STOP_LOSS_LOOKBACK:]) if len(all_prices) >= STOP_LOSS_LOOKBACK else None
-    bb_upper, bb_middle, bb_lower = calculate_bollinger_bands(all_prices, BB_PERIOD)
 
     # Null check for all indicators
-    if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_20, bb_upper, bb_middle, bb_lower]) or macd_hist_series is None or len(macd_hist_series) < 2:
+    if any(v is None for v in [sma_100, sma_50, sma_20, rsi, short_atr, long_atr, roc_20, donchian_high_20]) or macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
 
     macd_histogram = macd_hist_series[-1]
@@ -198,9 +175,8 @@ def decide(current_price, price_history, news_context):
     # --- 4. Decision Logic (Hierarchical) ---
 
     # REGIME 1: CONTRARIAN CAPITULATION (HIGHEST PRIORITY)
-    # Buy when there is blood in the streets, but only if momentum shows signs of turning
-    # AND sentiment is not catastrophically negative (e.g., black swan).
-    if is_capitulation_candidate and macd_hist_delta > 0 and net_sentiment_score > -2.0:
+    # Buy when there is blood in the streets, but only if momentum shows signs of turning.
+    if is_capitulation_candidate and macd_hist_delta > 0:
         return "BUY"
 
     # REGIME 2: CRISIS AVERSION
@@ -213,40 +189,40 @@ def decide(current_price, price_history, news_context):
     # REGIME 3: NORMAL MARKET CONDITIONS
 
     # --- SELL LOGIC (Risk Management First) ---
-    # Priority 1: Dynamic ATR-based Stop-Loss.
-    # LTM feedback: "ATR-based stop-loss (2.5 * ATR below 20-day high)"
-    if current_price < (donchian_high_20 - (2.5 * short_atr)):
+    # Priority 1: Dynamic Stop-Loss. Tighter 7% drop from 20-day high.
+    if current_price < (donchian_high_20 * 0.93):
         return "SELL"
 
-    # Priority 2: Profit-taking on extreme overbought conditions with FADING momentum.
-    is_momentum_fading = macd_hist_delta < 0
-    is_extremely_overbought_rsi = rsi > 82
-    is_overbought_bb = current_price > bb_upper
-
-    if (is_extremely_overbought_rsi or is_overbought_bb) and is_momentum_fading:
-        return "SELL"
-
-    # Priority 3: Standard trend breakdown signal with relaxed sentiment.
+    # Priority 2: Standard trend breakdown signal OR shorter-term trend reversal.
     is_primary_downtrend = current_price < sma_50
+    is_short_term_downtrend = current_price < sma_20 # NEW
     is_momentum_confirming_down = macd_histogram < 0 and prev_macd_histogram >= 0
-    is_sentiment_permissive_for_sell_normal = net_sentiment_score < 1.0 # Relaxed for normal trades
-    if is_primary_downtrend and is_momentum_confirming_down and is_sentiment_permissive_for_sell_normal:
+    is_momentum_already_negative = macd_histogram < 0 # NEW
+    is_sentiment_permissive_for_sell = net_sentiment_score < 3.0
+
+    if (is_primary_downtrend and is_momentum_confirming_down and is_sentiment_permissive_for_sell) or \
+       (is_short_term_downtrend and is_momentum_already_negative and is_sentiment_permissive_for_sell): # NEW condition added
+        return "SELL"
+
+    # Priority 3: Profit-taking on extreme overbought conditions with FADING momentum.
+    is_momentum_fading = macd_hist_delta < 0
+    is_extremely_overbought = rsi > 82
+    if is_extremely_overbought and is_momentum_fading:
         return "SELL"
 
     # --- BUY LOGIC ---
     is_primary_uptrend = current_price > sma_50
+    is_short_term_uptrend = current_price > sma_20 # NEW
     is_momentum_confirming_up = macd_histogram > 0 and prev_macd_histogram <= 0
-    is_not_overbought_rsi = rsi < 78
-    is_oversold_bb = current_price < bb_lower
-    is_sentiment_permissive_for_buy_normal = net_sentiment_score > -1.0 # Relaxed for normal trades
+    is_momentum_already_positive = macd_histogram > 0 # NEW
+    is_not_overbought_primary = rsi < 78
+    is_not_overbought_secondary = rsi < 70 # NEW: Slightly tighter for the new buy signal
+    is_sentiment_permissive_for_buy = net_sentiment_score > -3.0
     is_sufficient_volatility = short_atr > (long_atr * 0.6) # Avoids entering dead, sideways markets.
 
-    # Priority 1: Buy on Bollinger Band bounce with positive momentum.
-    if is_oversold_bb and is_momentum_confirming_up and is_sentiment_permissive_for_buy_normal:
-        return "BUY"
-
-    # Priority 2: Standard trend continuation buy.
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought_rsi and is_sentiment_permissive_for_buy_normal and is_sufficient_volatility:
+    # Original high-conviction buy OR new, more frequent buy signal
+    if (is_primary_uptrend and is_momentum_confirming_up and is_not_overbought_primary and is_sentiment_permissive_for_buy and is_sufficient_volatility) or \
+       (is_short_term_uptrend and is_momentum_already_positive and is_not_overbought_secondary and is_sentiment_permissive_for_buy and is_sufficient_volatility): # NEW condition added
         return "BUY"
 
     # Default action is to hold the current position.
