@@ -14,7 +14,7 @@ def calculate_ema_series(data, period):
             ema_values[0] = np.mean(data_arr[:period])
             multiplier = 2 / (period + 1)
             for i in range(1, len(ema_values)):
-                ema_values[i] = (data_arr[i + period - 1] - ema_values[i-1]) * multiplier + ema_values[i-1]
+                ema_values[i] = (data_arr[i + period - 1] - em.ema_values[i-1]) * multiplier + ema_values[i-1]
         return ema_values
 
 def calculate_macd_series(prices, short_period=12, long_period=26, signal_period=9):
@@ -105,26 +105,26 @@ def calculate_keltner_channel(prices, period=20):
 def calculate_sentiment_score(news_context):
     context_lower = news_context.lower()
     sentiment_keywords = {
-        "fed pivot": 3.0, "rate cut": 2.5, "quantitative easing": 2.5, "soft landing": 2.5,
-        "cooling inflation": 2.5, "cpi miss": 2.5, "ai boom": 2.5, "stimulus": 2.0,
-        "dovish": 2.0, "record high": 2.0, "bullish": 2.0, "strong earnings": 2.0,
-        "beat estimates": 1.5, "recovery": 1.5, "upgrade": 1.5, "de-escalation": 2.0,
-        "short squeeze": 3.5, "capitulation": 3.0, "panic selling": 2.5, "extreme fear": 2.0,
+        "fed pivot": 3.5, "rate cut": 3.0, "quantitative easing": 2.8, "soft landing": 2.7,
+        "cooling inflation": 2.6, "cpi miss": 2.5, "ai boom": 2.5, "stimulus": 2.2,
+        "dovish": 2.1, "record high": 2.0, "bullish": 2.0, "strong earnings": 2.0,
+        "beat estimates": 1.6, "recovery": 1.6, "upgrade": 1.5, "de-escalation": 2.1,
+        "short squeeze": 3.8, "capitulation": 3.2, "panic selling": 2.6, "extreme fear": 2.1,
         "strong jobs report": 0.0, 
-        "recession": -3.0, "crisis": -3.0, "stagflation": -3.0, "hot inflation": -3.0,
-        "war": -3.0, "yield curve inversion": -3.5, "quantitative tightening": -2.5,
-        "black swan": -4.0, "systemic risk": -4.0, "contagion": -3.5, "credit crunch": -3.5,
-        "rate hike": -2.5, "bankruptcy": -2.5, "hard landing": -2.5, "geopolitical risk": -2.5,
-        "cpi beat": -2.5, "vix spike": -2.5, "hawkish": -2.0, "bearish": -2.0,
-        "sell-off": -2.0, "weak earnings": -2.0, "market turmoil": -2.0, "bubble": -2.0,
-        "economic slowdown": -2.0, "market correction": -2.0, "regime shift": -3.0,
-        "uncertainty": -1.5,
-        "euphoria": -2.5, "mania": -3.0, "irrational exuberance": -3.0, "extreme greed": -2.5,
-        "market rebound": 2.5, "rebound potential": 2.0, "safe haven": 1.5,
-        "economic recovery": 2.0, "bull market": 2.0, "bear market": -2.0,
-        "inflation concerns": -1.0, "deflation risk": -2.0, "market breadth": 1.0
+        "recession": -3.5, "crisis": -3.5, "stagflation": -3.5, "hot inflation": -3.5,
+        "war": -3.5, "yield curve inversion": -4.0, "quantitative tightening": -3.0,
+        "black swan": -4.5, "systemic risk": -4.5, "contagion": -4.0, "credit crunch": -3.8,
+        "rate hike": -3.0, "bankruptcy": -3.0, "hard landing": -3.0, "geopolitical risk": -2.8,
+        "cpi beat": -3.0, "vix spike": -3.0, "hawkish": -2.5, "bearish": -2.5,
+        "sell-off": -2.5, "weak earnings": -2.5, "market turmoil": -2.5, "bubble": -2.5,
+        "economic slowdown": -2.5, "market correction": -2.5, "regime shift": -3.5,
+        "uncertainty": -1.8,
+        "euphoria": -3.0, "mania": -3.5, "irrational exuberance": -3.5, "extreme greed": -3.0,
+        "market rebound": 2.8, "rebound potential": 2.3, "safe haven": 1.8,
+        "economic recovery": 2.5, "bull market": 2.5, "bear market": -2.5,
+        "inflation concerns": -1.5, "deflation risk": -3.0, "market breadth": 1.2
     }
-    negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent", "unlikely", "avoid", "no signs of", "unlikely to", "lack", "absence"]
+    negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent", "unlikely", "avoid", "no signs of", "unlikely to", "lack", "absence", "doesn't", "can't", "won't", "shouldn't", "isn't", "aren't"]
     net_sentiment_score = 0.0
     for keyword, weight in sentiment_keywords.items():
         pattern = r'(?<!\S)' + re.escape(keyword) + r'(?!\S)'
@@ -150,7 +150,7 @@ def decide(current_price, price_history, news_context):
     rsi = calculate_rsi(all_prices, 14)
     macd_line, signal_line, macd_hist_series = calculate_macd_series(all_prices)
     short_atr = calculate_atr(all_prices, 20)
-    long_atr = calculate_atr(all_prices, 50)
+    long_atr = calculate_atr(all_prices, max(50, len(all_prices)//3))
     roc_20 = calculate_roc(all_prices, 20)
     donchian_high_30, donchian_low_30 = calculate_donchian_channel(all_prices, 30)
     upper_band, lower_band = calculate_bollinger_bands(all_prices)
@@ -166,59 +166,59 @@ def decide(current_price, price_history, news_context):
     macd_hist_delta = macd_histogram - prev_macd_histogram
 
     is_high_volatility = short_atr > (long_atr * 1.75)
-    is_extreme_volatility = short_atr > (long_atr * 2.0)
+    is_extreme_volatility = short_atr > (long_atr * 2.2)
 
     is_long_term_downtrend = current_price < sma_200
-    is_crash_velocity = roc_20 < -15.0
+    is_crash_velocity = roc_20 < -18.0
     is_crisis_regime = (is_long_term_downtrend and is_high_volatility) or is_crash_velocity
 
-    is_deeply_oversold = rsi < 30
-    is_extreme_crash_velocity = roc_20 < -18.0
+    is_deeply_oversold = rsi < 28
+    is_extreme_crash_velocity = roc_20 < -20.0
     is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold
 
-    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 20 and ema_12 > ema_26:
+    if is_capitulation_candidate and macd_hist_delta > 0.5 and stochastic_oscillator < 18 and ema_12 > ema_26 and sentiment_score > -1.5:
         return "BUY"
 
     if is_crisis_regime:
-        is_recovering_from_oversold = rsi > 35 and macd_hist_delta > 0 and stochastic_oscillator > 80
-        if is_recovering_from_oversold and sentiment_score > -1.0:
+        is_recovering_from_oversold = rsi > 38 and macd_hist_delta > 0.3 and stochastic_oscillator > 82 and sentiment_score > -0.8
+        if is_recovering_from_oversold:
             return "BUY"
-        if macd_histogram < 0 or current_price < sma_50:
+        if macd_histogram < -0.5 or current_price < sma_50 * 0.95:
             return "SELL"
         return "HOLD"
 
     base_stop_loss_factor = 0.88
     if is_extreme_volatility:
-        stop_loss_factor = 0.80
+        stop_loss_factor = 0.78
     elif is_high_volatility:
-        stop_loss_factor = 0.85
+        stop_loss_factor = 0.83
     else:
         stop_loss_factor = base_stop_loss_factor
 
-    if current_price < (donchian_high_30 * stop_loss_factor):
+    if current_price < (donchian_high_30 * stop_loss_factor) and short_atr > long_atr * 1.2:
         return "SELL"
 
-    is_primary_downtrend = current_price < sma_50
-    is_momentum_confirming_down = macd_histogram < 0 and prev_macd_histogram >= 0
-    is_sentiment_permissive_for_sell = sentiment_score < 3.0
+    is_primary_downtrend = current_price < sma_50 * 0.98
+    is_momentum_confirming_down = macd_histogram < -0.3 and prev_macd_histogram >= 0
+    is_sentiment_permissive_for_sell = sentiment_score < 2.2
     if is_primary_downtrend and is_momentum_confirming_down and is_sentiment_permissive_for_sell:
         return "SELL"
 
-    is_momentum_fading = macd_hist_delta < 0
-    is_extremely_overbought = rsi > 82
-    if is_extremely_overbought and is_momentum_fading:
+    is_momentum_fading = macd_hist_delta < -0.2
+    is_extremely_overbought = rsi > 85
+    if is_extremely_overbought and is_momentum_fading and stochastic_oscillator > 85:
         return "SELL"
 
-    is_primary_uptrend = current_price > sma_50
-    is_momentum_confirming_up = macd_histogram > 0 and prev_macd_histogram <= 0
-    is_not_overbought = rsi < 78
-    is_sentiment_permissive_for_buy = sentiment_score > -3.0
-    is_sufficient_volatility = short_atr > (long_atr * 0.6)
-    is_price_in_bollinger_band = current_price > lower_band and current_price < upper_band
-    is_price_in_keltner_channel = current_price > keltner_lower_band and current_price < keltner_upper_band
-    is_ema_crossover = ema_12 is not None and ema_26 is not None and ema_12 > ema_26
+    is_primary_uptrend = current_price > sma_50 * 1.02
+    is_momentum_confirming_up = macd_histogram > 0.3 and prev_macd_histogram <= 0
+    is_not_overbought = rsi < 75
+    is_sentiment_permissive_for_buy = sentiment_score > -2.5
+    is_sufficient_volatility = short_atr > (long_atr * 0.65)
+    is_price_in_bollinger_band = current_price > lower_band * 1.01 and current_price < upper_band * 0.99
+    is_price_in_keltner_channel = current_price > keltner_lower_band * 1.01 and current_price < keltner_upper_band * 0.99
+    is_ema_crossover = ema_12 is not None and ema_26 is not None and ema_12 > ema_26 * 1.005
 
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_bollinger_band and is_price_in_keltner_channel and stochastic_oscillator > 20 and is_ema_crossover:
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_bollinger_band and is_price_in_keltner_channel and stochastic_oscillator > 25 and is_ema_crossover:
         return "BUY"
 
     return "HOLD"
