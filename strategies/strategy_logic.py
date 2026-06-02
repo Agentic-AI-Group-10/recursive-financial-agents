@@ -127,7 +127,24 @@ def calculate_ema(prices, period):
         return None
     return calculate_ema_series(prices, period)[-1]
 
-def decide(current_price, price_history, news_context):
+def calculate_macd_trend(prices, short_period=12, long_period=26):
+    """Calculates the MACD-like trend."""
+    short_ema_series = calculate_ema_series(prices, short_period)
+    long_ema_series = calculate_ema_series(prices, long_period)
+    return short_ema_series[len(short_ema_series)-len(long_ema_series):]
+
+def calculate_rsi_trend(prices, period=14):
+    """Calculates the RSI-like trend."""
+    rsi_values = calculate_rsi(prices, period)
+    return rsi_values[len(rsi_values)-1]
+
+def calculate_atr_trend(prices, period=14):
+    """Calculates the ATR-like trend."""
+    atr_series = calculate_atr(prices, period)
+    return atr_series[-1] if len(atr_series) > 0 else None
+
+def calculate_sentiment_score(news_context):
+    """Calculates the sentiment score based on news context."""
     context_lower = news_context.lower()
     sentiment_keywords = {
         "fed pivot": 3.0, "rate cut": 2.5, "quantitative easing": 2.5, "soft landing": 2.5,
@@ -153,7 +170,9 @@ def decide(current_price, price_history, news_context):
             pre_context = context_lower[max(0, match.start() - 30):match.start()]
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
             net_sentiment_score += -weight if is_negated else weight
+    return net_sentiment_score
 
+def decide(current_price, price_history, news_context):
     all_prices = price_history + [current_price]
     all_volumes = [0.0] * len(price_history) + [0.0]  # Replace with actual volume data
 
@@ -184,6 +203,10 @@ def decide(current_price, price_history, news_context):
     upper_band, lower_band = calculate_bollinger_bands(all_prices)
     stochastic_oscillator = calculate_stochastic_oscillator(all_prices)
     fi = calculate_force_index(all_prices, all_volumes)
+    macd_trend = calculate_macd_trend(all_prices)
+    rsi_trend = calculate_rsi_trend(all_prices)
+    atr_trend = calculate_atr_trend(all_prices)
+    sentiment_score = calculate_sentiment_score(news_context)
 
     if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_30, upper_band, lower_band, stochastic_oscillator, fi]) or \
        macd_hist_series is None or len(macd_hist_series) < 2:
@@ -210,7 +233,7 @@ def decide(current_price, price_history, news_context):
     if is_crisis_regime:
         is_recovering_from_oversold = rsi > 35 and macd_hist_delta > 0 and stochastic_oscillator > 80
         
-        if is_recovering_from_oversold and net_sentiment_score > -1.0: 
+        if is_recovering_from_oversold and sentiment_score > -1.0: 
             return "BUY"
         
         if macd_histogram < 0 or current_price < sma_50:
@@ -231,7 +254,7 @@ def decide(current_price, price_history, news_context):
 
     is_primary_downtrend = current_price < sma_50
     is_momentum_confirming_down = macd_histogram < 0 and prev_macd_histogram >= 0
-    is_sentiment_permissive_for_sell = net_sentiment_score < 3.0
+    is_sentiment_permissive_for_sell = sentiment_score < 3.0
     if is_primary_downtrend and is_momentum_confirming_down and is_sentiment_permissive_for_sell:
         return "SELL"
 
@@ -243,7 +266,7 @@ def decide(current_price, price_history, news_context):
     is_primary_uptrend = current_price > sma_50
     is_momentum_confirming_up = macd_histogram > 0 and prev_macd_histogram <= 0
     is_not_overbought = rsi < 78
-    is_sentiment_permissive_for_buy = net_sentiment_score > -3.0
+    is_sentiment_permissive_for_buy = sentiment_score > -3.0
     is_sufficient_volatility = short_atr > (long_atr * 0.6) 
     is_price_in_bollinger_band = current_price > lower_band and current_price < upper_band
 
