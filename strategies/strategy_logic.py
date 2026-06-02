@@ -1,7 +1,7 @@
 import numpy as np
 import re
 
-# --- Helper Functions for Technical Indicators ---
+# --- Helper Functions for Technical Indicators (Unchanged from robust parent) ---
 
 def calculate_sma(prices, period):
     """Calculates the Simple Moving Average (SMA) for the latest price."""
@@ -95,8 +95,8 @@ def calculate_bollinger_bands(prices, period=20, num_std_dev=2):
 
 def decide(current_price, price_history, news_context):
     """
-    A self-improved, multi-regime trading strategy with a robust, evidence-based
-    scoring system to reduce false signals and avoid low-volatility whipsaws.
+    A self-improved, multi-regime trading strategy with enhanced signal confirmation
+    to reduce false signals and improve mean-reversion logic.
 
     Parameters:
         current_price (float): The current day's closing price for SPY.
@@ -106,23 +106,22 @@ def decide(current_price, price_history, news_context):
     Returns:
         str: "BUY", "SELL", or "HOLD"
     """
-    # --- 1. Sentiment Analysis (Expanded Dictionary) ---
+    # --- 1. Sentiment Analysis (IMPROVED with contemporary keywords) ---
     context_lower = news_context.lower()
     sentiment_keywords = {
         "fed pivot": 3.0, "rate cut": 2.5, "stimulus": 2.0, "soft landing": 2.0,
-        "dovish": 2.0, "dovish fed": 2.5, "record high": 2.0, "all-time high": 2.0,
-        "bullish": 2.0, "surge": 2.0, "strong earnings": 2.0, "cooling inflation": 1.5,
-        "disinflation": 1.5, "ai boom": 2.0, "technological breakthrough": 2.0,
-        "easing tensions": 1.5, "beat": 1.5, "growth": 1.5, "recovery": 1.5,
-        "upgrade": 1.5, "strong jobs": 2.0, "consumer confidence": 1.5,
-        "quantitative easing": 2.0,
+        "dovish": 2.0, "record high": 2.0, "bullish": 2.0, "surge": 2.0,
+        "strong earnings": 2.0, "cooling inflation": 1.5, "disinflation": 1.5,
+        "ai boom": 2.5, "technological breakthrough": 2.0, "easing tensions": 1.5,
+        "beat": 1.5, "growth": 1.5, "recovery": 1.5, "upgrade": 1.5, "strong jobs": 2.0,
+        "consumer confidence": 1.5, "market rally": 2.0,
         "rate hike": -2.5, "recession": -2.5, "crisis": -2.5, "bankruptcy": -2.5,
-        "hard landing": -2.5, "stagflation": -2.5, "hawkish": -2.0, "hawkish fed": -2.5,
-        "bearish": -2.0, "plunge": -2.0, "inflation": -2.0, "sell-off": -2.0,
-        "weak earnings": -2.0, "geopolitical risk": -2.0, "market turmoil": -2.0,
-        "credit crunch": -2.5, "credit spread widening": -2.0, "tightening": -1.5,
-        "miss": -1.5, "downgrade": -1.5, "tariff": -1.5, "supply chain disruption": -1.5,
-        "uncertainty": -1.5, "weak jobs": -2.0, "quantitative tightening": -2.5
+        "hard landing": -2.5, "stagflation": -2.5, "hawkish": -2.0, "bearish": -2.0,
+        "plunge": -2.0, "inflation": -2.0, "sell-off": -2.0, "weak earnings": -2.0,
+        "geopolitical risk": -2.5, "war": -3.0, "conflict": -3.0, "sanctions": -2.5,
+        "market turmoil": -2.0, "credit crunch": -2.5, "ai bubble": -2.0,
+        "tightening": -1.5, "miss": -1.5, "downgrade": -1.5, "tariff": -1.5,
+        "supply chain disruption": -1.5, "uncertainty": -1.5, "weak jobs": -2.0
     }
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids"]
     net_sentiment_score = 0.0
@@ -160,84 +159,60 @@ def decide(current_price, price_history, news_context):
     macd_histogram = macd_hist_series[-1]
     prev_macd_histogram = macd_hist_series[-2]
 
-    # **IMPROVEMENT**: Three-tiered Volatility Regime Detection
+    # Adaptive Volatility Regime
     log_returns = np.log(np.array(all_prices)[1:] / np.array(all_prices)[:-1])
     short_term_vol = np.std(log_returns[-VOL_SHORT_PERIOD:])
     long_term_vol = np.std(log_returns[-VOL_LONG_PERIOD:])
-    
     is_high_volatility = (short_term_vol > long_term_vol * 1.5) and (short_term_vol > 0.015)
-    is_low_volatility = (short_term_vol < long_term_vol * 0.8)
 
     # --- 3. Multi-Regime Decision Logic ---
     if is_high_volatility:
-        # === CRISIS MODE: High-conviction trend-following (Unchanged) ===
+        # === CRISIS MODE: High-conviction trend-following (Unchanged from successful parent) ===
+        BULLISH_SENTIMENT_THRESHOLD = 2.5
+        BEARISH_SENTIMENT_THRESHOLD = -2.5
+        
         bullish_trend = short_ema > long_ema
         bearish_trend = short_ema < long_ema
         
-        if net_sentiment_score >= 2.5 and bullish_trend and macd_histogram > 0 and rsi < 65:
+        if net_sentiment_score >= BULLISH_SENTIMENT_THRESHOLD and bullish_trend and macd_histogram > 0 and rsi < 65:
             return "BUY"
-        elif net_sentiment_score <= -2.5 and bearish_trend and macd_histogram < 0 and rsi > 35:
+        elif net_sentiment_score <= BEARISH_SENTIMENT_THRESHOLD and bearish_trend and macd_histogram < 0 and rsi > 35:
             return "SELL"
-            
-    elif is_low_volatility:
-        # === LOW VOLATILITY MODE: Avoid whipsaws (New) ===
-        # In low volatility, trends are unreliable. Stay out to avoid transaction costs.
-        return "HOLD"
-        
     else:
-        # === NORMAL MODE: Adaptive logic based on trend strength ===
+        # === NORMAL MODE: Adaptive with Enhanced Confirmation Logic ===
         trend_strength = abs(short_ema - long_ema) / long_ema
         is_choppy_market = trend_strength < 0.005
 
         if not is_choppy_market:
-            # **IMPROVEMENT**: Evidence-based scoring system for trending markets
-            buy_score = 0.0
-            sell_score = 0.0
+            # Sub-Regime: Normal Trending Market
+            bullish_trend = short_ema > long_ema
+            bearish_trend = short_ema < long_ema
             
-            # Trend Signal (Weight: 1.0)
-            if short_ema > long_ema: buy_score += 1.0
-            else: sell_score += 1.0
-            
-            # Momentum Signal (Weight: 1.5)
-            if macd_histogram > 0 and macd_histogram > prev_macd_histogram: buy_score += 1.5 # Accelerating
-            elif macd_histogram > 0: buy_score += 0.5 # Decelerating
-            if macd_histogram < 0 and macd_histogram < prev_macd_histogram: sell_score += 1.5 # Accelerating
-            elif macd_histogram < 0: sell_score += 0.5 # Decelerating
-            
-            # RSI Signal (Weight: 1.0) - Acts as entry filter and exit trigger
-            if rsi > 78: sell_score += 1.0 # Overbought, potential exit
-            if rsi < 22: buy_score += 1.0  # Oversold, potential entry/reversal
-            
-            # Sentiment Signal (Weight: 1.0)
-            if net_sentiment_score > 1.0: buy_score += 1.0
-            if net_sentiment_score < -1.0: sell_score += 1.0
-            
-            # Decision Thresholds
-            BUY_THRESHOLD = 2.5
-            SELL_THRESHOLD = 2.5
-            
-            if buy_score >= BUY_THRESHOLD and buy_score > sell_score + 0.5:
-                return "BUY"
-            if sell_score >= SELL_THRESHOLD and sell_score > buy_score + 0.5:
+            # Proactive profit-taking / trend exhaustion signal (Unchanged from parent)
+            is_momentum_fading_up = macd_histogram > 0 and macd_histogram < prev_macd_histogram
+            if bullish_trend and rsi > 78 and is_momentum_fading_up:
                 return "SELL"
-                
-        else:
-            # Sub-Regime: Choppy / Ranging Market (Mean-Reversion, unchanged from parent)
-            MEDIUM_TERM_SMA_PERIOD = 50
-            if len(all_prices) < MEDIUM_TERM_SMA_PERIOD:
-                return "HOLD"
-            
-            medium_sma = calculate_sma(all_prices, MEDIUM_TERM_SMA_PERIOD)
-            if medium_sma is None:
-                return "HOLD"
 
-            # Buy the dip if confirmed by RSI, Bollinger Bands, and medium-term trend
-            if (rsi < 30 and current_price < lower_band) and \
-               (net_sentiment_score > -2.0) and (current_price > medium_sma):
+            # **IMPROVEMENT**: Entry requires 2-day momentum confirmation to avoid whipsaws
+            if bullish_trend and macd_histogram > 0 and prev_macd_histogram > 0 and rsi < 75 and net_sentiment_score > -1.5:
                 return "BUY"
-            # Sell the rip if confirmed by RSI and Bollinger Bands
-            elif (rsi > 70 and current_price > upper_band) and \
-                 (net_sentiment_score < 2.0):
+            
+            # **IMPROVEMENT**: Exit requires 2-day momentum confirmation
+            if bearish_trend and macd_histogram < 0 and prev_macd_histogram < 0 and rsi > 25 and net_sentiment_score < 1.5:
+                return "SELL"
+        else:
+            # Sub-Regime: Choppy / Ranging Market (IMPROVED Mean-Reversion Logic)
+            
+            # **IMPROVEMENT**: Buy the dip if oversold and downward momentum is fading
+            is_reversing_up = macd_histogram > prev_macd_histogram
+            if (rsi < 30 and current_price < lower_band) and \
+               (net_sentiment_score > -2.0) and is_reversing_up:
+                return "BUY"
+                
+            # **IMPROVEMENT**: Sell the rip if overbought and upward momentum is fading
+            is_reversing_down = macd_histogram < prev_macd_histogram
+            if (rsi > 70 and current_price > upper_band) and \
+                 (net_sentiment_score < 2.0) and is_reversing_down:
                 return "SELL"
 
     return "HOLD"
