@@ -4,18 +4,6 @@ import math
 
 # --- Helper Functions for Technical Indicators ---
 
-def calculate_sma_series(data, period):
-    """Calculates a full series of Simple Moving Averages."""
-    if len(data) < period:
-        return np.array([])
-    data_arr = np.array(data, dtype=float)
-    try:
-        import pandas as pd
-        return pd.Series(data_arr).rolling(window=period).mean().to_numpy()[period-1:]
-    except ImportError:
-        weights = np.repeat(1.0, period) / period
-        return np.convolve(data_arr, weights, 'valid')
-
 def calculate_ema_series(data, period):
     """Calculates a full series of Exponential Moving Averages."""
     if len(data) < period:
@@ -81,22 +69,25 @@ def calculate_atr(prices, period=14):
     atr_series = calculate_ema_series(price_ranges, period)
     return atr_series[-1] if len(atr_series) > 0 else None
 
-def calculate_roc(prices, period):
-    """Calculates the Rate of Change (ROC)."""
+def calculate_roc(prices, period=20):
+    """Calculates the Rate of Change (ROC) over a given period."""
     if len(prices) < period + 1:
         return None
-    return (prices[-1] - prices[-1 - period]) / prices[-1 - period]
+    return ((prices[-1] - prices[-1 - period]) / prices[-1 - period]) * 100
 
 def decide(current_price, price_history, news_context):
     """
     SELF-IMPROVED STRATEGY:
-    This version enhances the successful parent by introducing two key refinements:
-    1. Choppy Market Filter: Uses the slope of the 50-day SMA to detect sideways markets,
-       preventing whipsaw trades by holding during periods of low trend strength.
-    2. Enhanced Crisis Detection: Adds a Rate-of-Change (ROC) check to identify
-       high-velocity crashes, making the crisis aversion mode more responsive.
+    This version enhances the parent by incorporating key lessons from past runs:
+    1.  Enhanced Crisis Detection: Adds a Rate-of-Change (ROC) trigger to detect
+        high-velocity crashes, complementing the existing trend/volatility-based system.
+    2.  Dynamic Stop-Loss: Implements a trailing stop-loss proxy using the 20-day
+        high to protect profits and cut losses more effectively than lagging indicators.
+    3.  Whipsaw Reduction: A new volatility filter prevents BUY signals in low-energy,
+        sideways markets, focusing capital on higher-conviction trends.
     """
     # --- 1. Sentiment Analysis ---
+    # Robust keyword list retained, with minor weight adjustments for context.
     context_lower = news_context.lower()
     sentiment_keywords = {
         "fed pivot": 3.0, "rate cut": 2.5, "quantitative easing": 2.5, "soft landing": 2.5,
@@ -110,7 +101,7 @@ def decide(current_price, price_history, news_context):
         "rate hike": -2.5, "bankruptcy": -2.5, "hard landing": -2.5, "geopolitical risk": -2.5,
         "cpi beat": -2.5, "vix spike": -2.5, "hawkish": -2.0, "bearish": -2.0,
         "sell-off": -2.0, "weak earnings": -2.0, "market turmoil": -2.0, "bubble": -2.0,
-        "uncertainty": -1.5, "strong jobs report": -1.0, # Reduced weight to be less impactful
+        "uncertainty": -1.5, "strong jobs report": -1.0, # Reduced negative weight
         "euphoria": -2.5, "mania": -3.0, "irrational exuberance": -3.0, "extreme greed": -2.5,
     }
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent"]
@@ -131,82 +122,73 @@ def decide(current_price, price_history, news_context):
     RSI_PERIOD = 14
     ATR_SHORT = 10
     ATR_LONG = 50
-    ROC_CRASH_PERIOD = 10
-    MACD_SHORT, MACD_LONG, MACD_SIGNAL = 12, 26, 9
+    ROC_PERIOD = 20
+    STOP_LOSS_LOOKBACK = 20
 
-    required_history_length = max(SMA_TREND_LONG + 1, ATR_LONG + 1, MACD_LONG + MACD_SIGNAL, SMA_TREND_MEDIUM + 5)
+    required_history_length = max(SMA_TREND_LONG + 1, ATR_LONG + 1, 50) # Simplified requirement
     if len(all_prices) < required_history_length:
         return "HOLD"
 
     # Calculate core indicators
     sma_100 = calculate_sma(all_prices, SMA_TREND_LONG)
-    sma_50_series = calculate_sma_series(all_prices, SMA_TREND_MEDIUM)
-    sma_50 = sma_50_series[-1]
+    sma_50 = calculate_sma(all_prices, SMA_TREND_MEDIUM)
     rsi = calculate_rsi(all_prices, RSI_PERIOD)
-    _, _, macd_hist_series = calculate_macd_series(all_prices, MACD_SHORT, MACD_LONG, MACD_SIGNAL)
+    _, _, macd_hist_series = calculate_macd_series(all_prices)
     short_atr = calculate_atr(all_prices, ATR_SHORT)
     long_atr = calculate_atr(all_prices, ATR_LONG)
-    roc_10 = calculate_roc(all_prices, ROC_CRASH_PERIOD)
+    roc_20 = calculate_roc(all_prices, ROC_PERIOD)
+    donchian_high_20 = np.max(all_prices[-STOP_LOSS_LOOKBACK:]) if len(all_prices) >= STOP_LOSS_LOOKBACK else None
 
     # Null check for all indicators
-    if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_10]) or macd_hist_series is None or len(macd_hist_series) < 2:
+    if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_20]) or macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
 
     macd_histogram = macd_hist_series[-1]
     prev_macd_histogram = macd_hist_series[-2]
 
-    # --- 3. Regime Detection ---
-    # ENHANCED Crisis Detection: Adds a velocity component (ROC) to the parent's logic.
+    # --- 3. Regime Detection (Enhanced with Velocity Trigger) ---
     is_long_term_downtrend = current_price < sma_100
-    is_high_volatility = short_atr > (long_atr * 1.8) # Increased threshold for higher confidence
-    is_crash_velocity = roc_10 < -0.08 # A drop of 8% in 10 days signals panic
-    is_crisis_regime = is_long_term_downtrend and (is_high_volatility or is_crash_velocity)
-
-    # NEW Choppy Market Filter: Detects sideways markets to avoid whipsaws.
-    sma_50_slope = (sma_50_series[-1] - sma_50_series[-6]) / 5
-    is_choppy_market = abs(sma_50_slope) < (sma_50 * 0.001) # Trend is moving less than 0.1% per day
+    is_high_volatility = short_atr > (long_atr * 1.75)
+    is_crash_velocity = roc_20 < -15.0  # A >15% drop in 20 days signals a crisis.
+    is_crisis_regime = (is_long_term_downtrend and is_high_volatility) or is_crash_velocity
 
     # --- 4. Decision Logic ---
 
-    # REGIME 1: CRISIS AVERSION (Highest Priority)
+    # REGIME 1: CRISIS AVERSION
     if is_crisis_regime:
         if macd_histogram < 0 or current_price < sma_50:
             return "SELL"
-        return "HOLD" # Hold cash and wait for the crisis to pass
+        return "HOLD" # Hold cash and wait for crisis to pass
 
-    # REGIME 2: CHOPPY MARKET FILTER (Second Priority)
-    # If the market is directionless, we avoid opening new trend-following positions.
-    if is_choppy_market:
-        # Exception: Allow profit-taking exits even in choppy markets.
-        is_momentum_fading = macd_histogram > 0 and macd_histogram < prev_macd_histogram
-        is_extremely_overbought = rsi > 80
-        if is_extremely_overbought and is_momentum_fading:
-            return "SELL"
-        return "HOLD"
+    # REGIME 2: NORMAL / RECOVERY
 
-    # REGIME 3: NORMAL TREND-FOLLOWING (Default)
-    is_primary_uptrend = current_price > sma_50
+    # --- SELL LOGIC (Enhanced with Dynamic Stop-Loss) ---
+    # Priority 1: Dynamic Stop-Loss based on recent peak. Cuts losses/protects profits quickly.
+    if current_price < (donchian_high_20 * 0.92): # Sell if price drops 8% from 20-day high
+        return "SELL"
 
-    # --- BUY LOGIC ---
-    is_momentum_confirming_up = macd_histogram > 0 and prev_macd_histogram <= 0
-    is_not_overbought = rsi < 78
-    is_sentiment_permissive_for_buy = net_sentiment_score > -2.5
-
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy:
-        return "BUY"
-
-    # --- SELL LOGIC ---
+    # Priority 2: Standard trend breakdown signal.
     is_primary_downtrend = current_price < sma_50
     is_momentum_confirming_down = macd_histogram < 0 and prev_macd_histogram >= 0
     is_sentiment_permissive_for_sell = net_sentiment_score < 2.5
-
     if is_primary_downtrend and is_momentum_confirming_down and is_sentiment_permissive_for_sell:
         return "SELL"
 
-    # Additional profit-taking logic (also checked in choppy regime)
+    # Priority 3: Profit-taking on extreme overbought conditions with fading momentum.
     is_momentum_fading = macd_histogram > 0 and macd_histogram < prev_macd_histogram
     is_extremely_overbought = rsi > 80
     if is_extremely_overbought and is_momentum_fading:
         return "SELL"
 
+    # --- BUY LOGIC (Enhanced with Volatility Filter) ---
+    is_primary_uptrend = current_price > sma_50
+    is_momentum_confirming_up = macd_histogram > 0 and prev_macd_histogram <= 0
+    is_not_overbought = rsi < 78
+    is_sentiment_permissive_for_buy = net_sentiment_score > -2.5
+    is_sufficient_volatility = short_atr > (long_atr * 0.6) # Avoids entering dead, sideways markets.
+
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility:
+        return "BUY"
+
+    # Default action is to hold the current position.
     return "HOLD"
