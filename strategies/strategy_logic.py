@@ -112,25 +112,31 @@ def calculate_roc(prices, period=20):
 
 def decide(current_price, price_history, news_context):
     """
-    SELF-IMPROVED STRATEGY V7:
+    SELF-IMPROVED STRATEGY V8:
     This version refines the strategy based on lessons from stress regimes, particularly
     aiming to improve participation in V-shaped recoveries during crises while mitigating
     premature entries and stop-outs.
 
     Key Improvements:
-    1.  Wider Dynamic Stop-Loss: The stop-loss percentage is now wider (12% to 15% based on ATR)
-        and uses a longer lookback (30 days) for the Donchian High. This provides more room
-        for extreme fluctuations during high volatility, reducing premature stop-outs.
-    2.  Stricter Crisis Recovery Buy: The "Post-Crisis Recovery Buy" logic now requires
-        stronger technical signals (RSI > 40 and MACD histogram > 0) and a less
-        catastrophically negative sentiment threshold (net_sentiment_score > -1.0).
-        This aims to prevent buying into temporary dead cat bounces.
-    3.  Stricter Capitulation Buy: The "Capitulation Buy" also requires a stronger
-        momentum confirmation (MACD histogram > 0) to ensure a more sustained reversal
-        signal after extreme market conditions.
+    1.  More Sensitive Dynamic Stop-Loss Trigger: The `is_high_volatility` threshold is
+        lowered (from 1.75 to 1.5) to trigger the wider 15% stop-loss more frequently
+        during volatile periods, providing more room for price swings and reducing
+        premature stop-outs.
+    2.  Earlier Capitulation Buy: The "Capitulation Buy" now requires `macd_hist_delta > 0`
+        and `macd_histogram > -0.5`. This allows for an earlier entry as MACD momentum
+        turns upward from deeply negative territory, rather than waiting for a full
+        cross above zero, aiming to capture the initial bounce.
+    3.  Earlier Crisis Recovery Buy: The "Post-Crisis Recovery Buy" logic is made
+        more permissive for earlier entry:
+        -   RSI threshold lowered from `> 40` to `> 35`.
+        -   MACD confirmation changed from `macd_histogram > 0` to `macd_hist_delta > 0`
+            for an earlier signal of upward momentum.
+        -   Sentiment threshold relaxed from `net_sentiment_score > -1.0` to `> -2.0`
+            to allow entries even with lingering negative sentiment during recovery.
     4.  Maintains Robust Normal Regime Logic: The core trend-following and
         momentum-based buy/sell signals, along with profit-taking in overbought
-        conditions, remain effective for stable market environments.
+        conditions, remain effective for stable market environments, which contributed
+        to strong performance in past runs.
     """
     # --- 1. Sentiment Analysis ---
     context_lower = news_context.lower()
@@ -199,7 +205,8 @@ def decide(current_price, price_history, news_context):
     # --- 3. Regime Detection ---
     # Crisis Regime: General high-risk environment
     is_long_term_downtrend = current_price < sma_100
-    is_high_volatility = short_atr > (long_atr * 1.75) # Volatility threshold for adaptive stop-loss
+    # Adjusted volatility threshold for adaptive stop-loss (more sensitive)
+    is_high_volatility = short_atr > (long_atr * 1.5) 
     is_crash_velocity = roc_20 < -15.0
     is_crisis_regime = (is_long_term_downtrend and is_high_volatility) or is_crash_velocity
 
@@ -212,19 +219,20 @@ def decide(current_price, price_history, news_context):
 
     # REGIME 1: CONTRARIAN CAPITULATION (HIGHEST PRIORITY)
     # Buy when there is blood in the streets, but only if momentum shows strong signs of turning.
-    # Requires MACD histogram to cross above zero for stronger confirmation.
-    if is_capitulation_candidate and macd_histogram > 0: # Stricter MACD confirmation
+    # Modified for earlier MACD confirmation: histogram turning up from negative territory.
+    if is_capitulation_candidate and macd_hist_delta > 0 and macd_histogram > -0.5: 
         return "BUY"
 
     # REGIME 2: CRISIS AVERSION & RECOVERY (MODIFIED)
     # If in a general crisis (but not a specific capitulation buy signal), be defensive or seek recovery.
     if is_crisis_regime:
         # Stronger recovery signals: RSI bounced higher and MACD histogram turned positive.
-        is_recovering_from_oversold = rsi > 40 and macd_histogram > 0 # Stricter RSI and MACD
+        # Modified for earlier RSI and MACD signals, and more permissive sentiment.
+        is_recovering_from_oversold = rsi > 35 and macd_hist_delta > 0 
         
         # NEW: Post-Crisis Recovery Buy - if in crisis but showing strong recovery and sentiment not utterly catastrophic
         # Requires less negative sentiment for recovery, balancing between permissive and restrictive.
-        if is_recovering_from_oversold and net_sentiment_score > -1.0: # Adjusted sentiment for recovery
+        if is_recovering_from_oversold and net_sentiment_score > -2.0: # Adjusted sentiment for recovery
             return "BUY"
         
         # Otherwise, if no recovery buy signal, remain defensive.
@@ -240,7 +248,7 @@ def decide(current_price, price_history, news_context):
     # --- SELL LOGIC (Risk Management First) ---
     # Priority 1: Dynamic Stop-Loss. Adjusted based on volatility and made wider.
     base_stop_loss_factor = 0.88 # 12% drop (wider)
-    if is_high_volatility:
+    if is_high_volatility: # Triggered more easily now
         stop_loss_factor = 0.85 # 15% drop during high volatility (wider)
     else:
         stop_loss_factor = base_stop_loss_factor
