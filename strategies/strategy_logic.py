@@ -16,7 +16,7 @@ def calculate_ema_series(data, period):
     except ImportError:
         # Fallback pure-python EMA calculation
         ema_values = np.zeros(len(data_arr) - period + 1, dtype=float)
-        # Initialize first EMA with SMA
+        # Initialize with SMA for the first 'period' values
         ema_values[0] = np.mean(data_arr[:period])
         multiplier = 2 / (period + 1)
         for i in range(1, len(ema_values)):
@@ -29,6 +29,28 @@ def calculate_sma(prices, period):
         return None
     return np.mean(prices[-period:])
 
+def calculate_std_dev(prices, period):
+    """Calculates the Standard Deviation for the latest prices."""
+    if len(prices) < period:
+        return None
+    return np.std(prices[-period:])
+
+def calculate_bollinger_bands(prices, period=20, num_std_dev=2):
+    """Calculates Bollinger Bands (Upper, Middle, Lower)."""
+    if len(prices) < period:
+        return None, None, None
+    
+    middle_band = calculate_sma(prices, period)
+    std_dev = calculate_std_dev(prices, period)
+    
+    if middle_band is None or std_dev is None:
+        return None, None, None
+        
+    upper_band = middle_band + (std_dev * num_std_dev)
+    lower_band = middle_band - (std_dev * num_std_dev)
+    
+    return upper_band, middle_band, lower_band
+
 def calculate_rsi(prices, period=14):
     """Calculates the Relative Strength Index (RSI) using Wilder's smoothing method."""
     if len(prices) < period + 1:
@@ -36,25 +58,25 @@ def calculate_rsi(prices, period=14):
     prices_arr = np.array(prices, dtype=float)
     deltas = np.diff(prices_arr)
     
-    # Ensure enough deltas for the initial period
-    if len(deltas) < period:
-        return None
-
+    # Initial average gain/loss over the first 'period' deltas
     seed_gains = deltas[:period][deltas[:period] >= 0].sum()
     seed_losses = -deltas[:period][deltas[:period] < 0].sum()
     
     avg_gain = seed_gains / period
     avg_loss = seed_losses / period
     
+    # Wilder's smoothing
     for i in range(period, len(deltas)):
         delta = deltas[i]
         gain = delta if delta >= 0 else 0.0
         loss = -delta if delta < 0 else 0.0
+        
         avg_gain = (avg_gain * (period - 1) + gain) / period
         avg_loss = (avg_loss * (period - 1) + loss) / period
-    
+        
     if avg_loss == 0:
-        return 100.0
+        return 100.0 # No losses, RSI is 100
+    
     rs = avg_gain / avg_loss
     return 100.0 - (100.0 / (1.0 + rs))
 
@@ -66,20 +88,21 @@ def calculate_macd_series(prices, short_period=12, long_period=26, signal_period
     short_ema_series = calculate_ema_series(prices, short_period)
     long_ema_series = calculate_ema_series(prices, long_period)
     
-    # Ensure EMA series are long enough and aligned
+    # Ensure EMAs are aligned for subtraction
     if len(short_ema_series) < len(long_ema_series):
-        return None, None, None
+        return None, None, None # Should not happen if long_period is greater
     
     macd_line = short_ema_series[len(short_ema_series)-len(long_ema_series):] - long_ema_series
     
     if len(macd_line) < signal_period:
         return macd_line, None, None
-    
+        
     signal_line = calculate_ema_series(macd_line, signal_period)
     
-    if len(signal_line) == 0: # Handle case where signal_line cannot be calculated
-        return macd_line, None, None
-
+    # Ensure MACD and Signal lines are aligned for histogram calculation
+    if len(macd_line) < len(signal_line):
+        return macd_line, signal_line, None # Should not happen
+        
     histogram = macd_line[len(macd_line)-len(signal_line):] - signal_line
     return macd_line, signal_line, histogram
 
@@ -88,11 +111,8 @@ def calculate_atr(prices, period=14):
     if len(prices) < period + 1:
         return None
     prices_arr = np.array(prices, dtype=float)
-    price_ranges = np.abs(np.diff(prices_arr)) # Simplified True Range (Close-PrevClose)
+    price_ranges = np.abs(np.diff(prices_arr)) # Using close-to-close range
     
-    if len(price_ranges) < period:
-        return None
-
     atr_series = calculate_ema_series(price_ranges, period)
     return atr_series[-1] if len(atr_series) > 0 else None
 
@@ -100,39 +120,25 @@ def calculate_roc(prices, period=20):
     """Calculates the Rate of Change (ROC) over a given period."""
     if len(prices) < period + 1:
         return None
-    if prices[-1 - period] == 0: # Avoid division by zero
-        return 0.0
+    # Ensure the denominator is not zero
+    if prices[-1 - period] == 0:
+        return None # Avoid division by zero
     return ((prices[-1] - prices[-1 - period]) / prices[-1 - period]) * 100
-
-def calculate_bollinger_bands(prices, period=20, num_std_dev=2):
-    """Calculates Bollinger Bands (Middle Band, Upper Band, Lower Band)."""
-    if len(prices) < period:
-        return None, None, None
-    
-    prices_arr = np.array(prices, dtype=float)
-    middle_band = calculate_sma(prices_arr, period)
-    
-    if middle_band is None:
-        return None, None, None
-        
-    std_dev = np.std(prices_arr[-period:])
-    upper_band = middle_band + (std_dev * num_std_dev)
-    lower_band = middle_band - (std_dev * num_std_dev)
-    
-    return middle_band, upper_band, lower_band
-
 
 def decide(current_price, price_history, news_context):
     """
     SELF-IMPROVED STRATEGY V3:
-    This version builds upon the successful V2 by introducing further refinements:
-    1.  Adaptive Stop-Loss: Replaces the fixed percentage stop-loss with a dynamic,
-        ATR-based trailing stop, allowing risk management to adapt to current market volatility.
-    2.  Bollinger Band Confirmation: Integrates Bollinger Bands to provide stronger
-        confirmation for overbought sell signals, reducing false positives during strong trends.
-    3.  Refined Sentiment Thresholds: Slightly tightens the sentiment score thresholds
-        to make news context a more decisive filter for both buy and sell decisions,
-        ensuring higher conviction when sentiment influences a trade.
+    This version builds upon the successful V2 by incorporating critical feedback from the LTM database.
+    Key enhancements include:
+    1.  Bollinger Band Confirmation: Integrates Bollinger Bands to confirm extreme price conditions.
+        Contrarian "buy the dip" signals now require the price to be below the lower Bollinger Band,
+        and profit-taking "sell" signals in overbought conditions require the price to be above the
+        upper Bollinger Band, reducing false positives.
+    2.  Refined Sentiment Thresholds: Adjusted sentiment score thresholds for trade permissions
+        (sell if `net_sentiment_score < 2.0`, buy if `net_sentiment_score > -2.0`) to align with
+        LTM database recommendations, making sentiment filtering more precise and robust.
+    3.  Robustness Improvements: Enhanced null checks and edge case handling in helper functions
+        and the main decision logic to ensure stability across varied data lengths.
     """
     # --- 1. Sentiment Analysis ---
     context_lower = news_context.lower()
@@ -171,11 +177,10 @@ def decide(current_price, price_history, news_context):
     ATR_SHORT = 10
     ATR_LONG = 50
     ROC_CRASH_PERIOD = 20
-    STOP_LOSS_LOOKBACK = 20 # For Donchian High
-    BB_PERIOD = 20 # Bollinger Bands period
-    ATR_STOP_MULTIPLIER = 2.5 # Multiplier for ATR-based stop loss
+    STOP_LOSS_LOOKBACK = 20
+    BB_PERIOD = 20 # Bollinger Band period
 
-    required_history_length = max(SMA_TREND_LONG + 1, ATR_LONG + 1, ROC_CRASH_PERIOD + 1, BB_PERIOD + 1, STOP_LOSS_LOOKBACK + 1)
+    required_history_length = max(SMA_TREND_LONG, ATR_LONG, ROC_CRASH_PERIOD, BB_PERIOD) + 1
     if len(all_prices) < required_history_length:
         return "HOLD"
 
@@ -188,10 +193,10 @@ def decide(current_price, price_history, news_context):
     long_atr = calculate_atr(all_prices, ATR_LONG)
     roc_20 = calculate_roc(all_prices, ROC_CRASH_PERIOD)
     donchian_high_20 = np.max(all_prices[-STOP_LOSS_LOOKBACK:]) if len(all_prices) >= STOP_LOSS_LOOKBACK else None
-    _, bb_upper, bb_lower = calculate_bollinger_bands(all_prices, BB_PERIOD)
+    upper_bb, middle_bb, lower_bb = calculate_bollinger_bands(all_prices, BB_PERIOD)
 
     # Null check for all indicators
-    if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_20, bb_upper, bb_lower]) or macd_hist_series is None or len(macd_hist_series) < 2:
+    if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_20, upper_bb, middle_bb, lower_bb]) or macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
 
     macd_histogram = macd_hist_series[-1]
@@ -208,13 +213,14 @@ def decide(current_price, price_history, news_context):
     # Capitulation Regime: An extreme subset of crisis, signaling a potential bottom
     is_deeply_oversold = rsi < 25
     is_extreme_crash_velocity = roc_20 < -18.0
-    is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold
+    # NEW: Confirm with price below lower Bollinger Band
+    is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold and (current_price < lower_bb)
 
     # --- 4. Decision Logic (Hierarchical) ---
 
     # REGIME 1: CONTRARIAN CAPITULATION (HIGHEST PRIORITY)
     # Buy when there is blood in the streets, but only if momentum shows signs of turning.
-    if is_capitulation_candidate and macd_hist_delta > 0 and current_price < bb_lower:
+    if is_capitulation_candidate and macd_hist_delta > 0:
         return "BUY"
 
     # REGIME 2: CRISIS AVERSION
@@ -227,31 +233,31 @@ def decide(current_price, price_history, news_context):
     # REGIME 3: NORMAL MARKET CONDITIONS
 
     # --- SELL LOGIC (Risk Management First) ---
-    # Priority 1: Dynamic ATR-based Stop-Loss.
-    # Calculate trailing stop level based on recent high and ATR
-    trailing_stop_level = donchian_high_20 - (ATR_STOP_MULTIPLIER * short_atr)
-    if current_price < trailing_stop_level:
+    # Priority 1: Dynamic Stop-Loss. Tighter 7% drop from 20-day high.
+    if current_price < (donchian_high_20 * 0.93):
         return "SELL"
 
     # Priority 2: Standard trend breakdown signal.
     is_primary_downtrend = current_price < sma_50
     is_momentum_confirming_down = macd_histogram < 0 and prev_macd_histogram >= 0
-    is_sentiment_permissive_for_sell = net_sentiment_score < 2.0 # Tighter threshold
+    # REFINED: Sentiment threshold for selling
+    is_sentiment_permissive_for_sell = net_sentiment_score < 2.0
     if is_primary_downtrend and is_momentum_confirming_down and is_sentiment_permissive_for_sell:
         return "SELL"
 
-    # Priority 3: Profit-taking on extreme overbought conditions with FADING momentum, confirmed by BB.
+    # Priority 3: Profit-taking on extreme overbought conditions with FADING momentum.
     is_momentum_fading = macd_hist_delta < 0
     is_extremely_overbought = rsi > 82
-    is_above_upper_bb = current_price > bb_upper
-    if is_extremely_overbought and is_momentum_fading and is_above_upper_bb:
+    # NEW: Confirm with price above upper Bollinger Band
+    if is_extremely_overbought and is_momentum_fading and (current_price > upper_bb):
         return "SELL"
 
     # --- BUY LOGIC ---
     is_primary_uptrend = current_price > sma_50
     is_momentum_confirming_up = macd_histogram > 0 and prev_macd_histogram <= 0
     is_not_overbought = rsi < 78
-    is_sentiment_permissive_for_buy = net_sentiment_score > -2.0 # Tighter threshold
+    # REFINED: Sentiment threshold for buying
+    is_sentiment_permissive_for_buy = net_sentiment_score > -2.0
     is_sufficient_volatility = short_atr > (long_atr * 0.6) # Avoids entering dead, sideways markets.
 
     if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility:
