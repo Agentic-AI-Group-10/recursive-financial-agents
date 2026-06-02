@@ -208,6 +208,25 @@ def calculate_ichimoku_cloud(prices, period=26):
     chikou_span = prices[-26:]
     return tenkan_sen, kijun_sen, senkou_span_a, senkou_span_b, chikou_span
 
+def calculate_macd_trend(prices, period=26):
+    """Calculates the MACD trend."""
+    if len(prices) < period:
+        return None
+    macd_line, signal_line, macd_hist_series = calculate_macd_series(prices, 12, 26, 9)
+    return macd_line[-1]
+
+def calculate_ema_50(prices):
+    """Calculates the Exponential Moving Average (EMA) for the latest price."""
+    if len(prices) < 50:
+        return None
+    return calculate_ema_series(prices, 50)[-1]
+
+def calculate_ema_200(prices):
+    """Calculates the Exponential Moving Average (EMA) for the latest price."""
+    if len(prices) < 200:
+        return None
+    return calculate_ema_series(prices, 200)[-1]
+
 def decide(current_price, price_history, news_context):
     context_lower = news_context.lower()
     sentiment_score = calculate_sentiment_score(news_context)
@@ -221,8 +240,9 @@ def decide(current_price, price_history, news_context):
     sma_100 = calculate_sma(all_prices, max(100, len(all_prices) // 2))
     sma_50 = calculate_sma(all_prices, max(50, len(all_prices) // 4))
     rsi = calculate_rsi(all_prices, 14)
-    ema_50 = calculate_ema(all_prices, 50)
-    ema_trend = calculate_ema_trend(all_prices)
+    ema_50 = calculate_ema_50(all_prices)
+    ema_200 = calculate_ema_200(all_prices)
+    macd_trend = calculate_macd_trend(all_prices)
     macd_line, signal_line, macd_hist_series = calculate_macd_series(all_prices)
     short_atr = calculate_atr(all_prices, 10)
     long_atr = calculate_atr(all_prices, 50)
