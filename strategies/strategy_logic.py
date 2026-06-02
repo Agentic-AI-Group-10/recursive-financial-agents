@@ -11,14 +11,14 @@ def calculate_ema_series(data, period):
     data_arr = np.array(data, dtype=float)
     try:
         import pandas as pd
-        return pd.Series(data_arr).ewm(span=period, adjust=False).mean().to_numpy()
+        return pd.Series(data_arr).ewm(span=period, adjust=False).mean().to_numpy()[period-1:]
     except ImportError:
-        ema_values = np.zeros_like(data_arr)
-        ema_values[period-1] = np.mean(data_arr[:period])
+        ema_values = np.zeros(len(data_arr) - period + 1, dtype=float)
+        ema_values[0] = np.mean(data_arr[:period])
         multiplier = 2 / (period + 1)
-        for i in range(period, len(data_arr)):
-            ema_values[i] = (data_arr[i] - ema_values[i-1]) * multiplier + ema_values[i-1]
-        return ema_values[period-1:]
+        for i in range(1, len(ema_values)):
+            ema_values[i] = (data_arr[i + period - 1] - ema_values[i-1]) * multiplier + ema_values[i-1]
+        return ema_values
 
 def calculate_sma(prices, period):
     """Calculates the Simple Moving Average (SMA) for the latest price."""
@@ -51,10 +51,9 @@ def calculate_macd_series(prices, short_period=12, long_period=26, signal_period
     """Calculates the MACD line, signal line, and histogram series."""
     if len(prices) < long_period:
         return None, None, None
-    prices_arr = np.array(prices, dtype=float)
-    short_ema_full = calculate_ema_series(prices_arr, short_period)
-    long_ema_full = calculate_ema_series(prices_arr, long_period)
-    macd_line = short_ema_full[long_period-short_period:] - long_ema_full
+    short_ema_series = calculate_ema_series(prices, short_period)
+    long_ema_series = calculate_ema_series(prices, long_period)
+    macd_line = short_ema_series[len(short_ema_series)-len(long_ema_series):] - long_ema_series
     if len(macd_line) < signal_period:
         return macd_line, None, None
     signal_line = calculate_ema_series(macd_line, signal_period)
@@ -67,79 +66,69 @@ def calculate_atr(prices, period=14):
         return None
     prices_arr = np.array(prices, dtype=float)
     price_ranges = np.abs(np.diff(prices_arr))
-    # Using Wilder's smoothing (equivalent to EMA with alpha = 1/period)
-    try:
-        import pandas as pd
-        return pd.Series(price_ranges).ewm(alpha=1/period, adjust=False).mean().iloc[-1]
-    except ImportError:
-        atr_val = np.mean(price_ranges[:period])
-        for i in range(period, len(price_ranges)):
-            atr_val = ((atr_val * (period - 1)) + price_ranges[i]) / period
-        return atr_val
+    atr_series = calculate_ema_series(price_ranges, period)
+    return atr_series[-1] if len(atr_series) > 0 else None
+
+def calculate_roc(prices, period=20):
+    """Calculates the Rate of Change (ROC) over a given period."""
+    if len(prices) < period + 1:
+        return None
+    return ((prices[-1] - prices[-1 - period]) / prices[-1 - period]) * 100
 
 def calculate_bollinger_bands(prices, period=20, num_std_dev=2):
-    """Calculates Bollinger Bands."""
+    """Calculates Bollinger Bands and Bandwidth."""
     if len(prices) < period:
-        return None, None, None
-    prices_arr = np.array(prices[-period:], dtype=float)
-    middle_band = np.mean(prices_arr)
-    std_dev = np.std(prices_arr)
+        return None, None, None, None
+    prices_slice = prices[-period:]
+    middle_band = np.mean(prices_slice)
+    std_dev = np.std(prices_slice)
     upper_band = middle_band + (std_dev * num_std_dev)
     lower_band = middle_band - (std_dev * num_std_dev)
-    return upper_band, middle_band, lower_band
+    bandwidth = (upper_band - lower_band) / middle_band if middle_band != 0 else 0
+    return upper_band, middle_band, lower_band, bandwidth
 
 def calculate_adx(prices, period=14):
     """Calculates the Average Directional Index (ADX)."""
     if len(prices) < 2 * period:
         return None
     prices_arr = np.array(prices, dtype=float)
-    highs = prices_arr # Using close as a proxy for high/low
-    lows = prices_arr
+    deltas = np.diff(prices_arr)
     
-    up_move = np.diff(highs)
-    down_move = -np.diff(lows)
+    plus_dm = np.where((deltas > 0), deltas, 0)
+    minus_dm = np.where((deltas < 0), -deltas, 0)
     
-    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
-    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
+    tr = np.abs(deltas)
+
+    # Using EMA for smoothing (Wilder's smoothing is essentially an EMA with alpha=1/period)
+    atr_series = calculate_ema_series(tr, period)
+    plus_di_series = 100 * (calculate_ema_series(plus_dm, period) / atr_series)
+    minus_di_series = 100 * (calculate_ema_series(minus_dm, period) / atr_series)
     
-    tr = np.abs(np.diff(prices_arr)) # Simplified TR for close-only data
+    dx_series = 100 * (np.abs(plus_di_series - minus_di_series) / (plus_di_series + minus_di_series))
     
-    # Using Wilder's smoothing (equivalent to EMA with alpha = 1/period)
-    try:
-        import pandas as pd
-        atr = pd.Series(tr).ewm(alpha=1/period, adjust=False).mean().to_numpy()
-        plus_di = 100 * (pd.Series(plus_dm).ewm(alpha=1/period, adjust=False).mean().to_numpy() / atr)
-        minus_di = 100 * (pd.Series(minus_dm).ewm(alpha=1/period, adjust=False).mean().to_numpy() / atr)
-        dx = 100 * (np.abs(plus_di - minus_di) / (plus_di + minus_di))
-        adx = pd.Series(dx).ewm(alpha=1/period, adjust=False).mean().iloc[-1]
-        return adx
-    except (ImportError, ZeroDivisionError):
-        # Fallback calculation if pandas is not available or division by zero
-        return None
+    adx_series = calculate_ema_series(dx_series, period)
+    
+    return adx_series[-1] if len(adx_series) > 0 else None
 
 def decide(current_price, price_history, news_context):
     """
     SELF-IMPROVED STRATEGY V3:
-    This version introduces two major architectural upgrades for robustness:
-    1.  ADX Trend Strength Filter: A new core component, the Average Directional
-        Index (ADX), is implemented. The strategy now filters out low-conviction
-        trades by requiring a minimum trend strength (ADX > 22) before entering
-        positions in normal market conditions. This is designed to significantly
-        reduce whipsaw losses in sideways or choppy markets.
-    2.  Dynamic Volatility-Based Exits (ATR Chandelier Stop): The fixed percentage
-        stop-loss is replaced with a Chandelier Exit based on the Average True
-        Range (ATR). This allows the stop-loss to dynamically adapt to market
-        volatility—tightening in calm markets to protect profits and widening in
-        volatile markets to avoid premature exits.
-    3.  Bollinger Band Mean Reversion Signal: The contrarian "buy the dip" logic
-        is refined to use Bollinger Bands, triggering a buy on extreme statistical
-        deviations from the mean, providing a more robust signal than ROC alone.
+    This version introduces a multi-layered filtering system to enhance robustness.
+    1.  ADX Trend Filter: Normal market buy/sell signals based on MACD crossovers are
+        now gated by an ADX > 22 condition. This filters out low-conviction trades
+        during choppy, non-trending markets, significantly reducing whipsaws.
+    2.  Dynamic ATR Stop-Loss: The static percentage stop-loss is replaced with a
+        volatility-adaptive stop based on `Donchian High - 3 * ATR`. This tightens
+        risk control in calm markets and allows more room in volatile ones.
+    3.  Bollinger Band Breakout Signal: A new, orthogonal entry condition is added
+        to buy on breakouts above the upper Bollinger Band, but only when emerging
+        from a low-volatility "squeeze," capturing explosive moves early.
     """
     # --- 1. Sentiment Analysis ---
     context_lower = news_context.lower()
     sentiment_keywords = {
         "fed pivot": 3.0, "rate cut": 2.5, "quantitative easing": 2.5, "soft landing": 2.5,
-        "cooling inflation": 2.5, "cpi miss": 2.5, "ai boom": 2.5, "stimulus": 2.0,
+        "cooling inflation": 2.5, "cpi miss": 2.5, "ai boom": 2.0, "stimulus": 2.0,
         "dovish": 2.0, "record high": 2.0, "bullish": 2.0, "strong earnings": 2.0,
         "beat estimates": 1.5, "recovery": 1.5, "upgrade": 1.5, "de-escalation": 2.0,
         "short squeeze": 3.5, "capitulation": 3.0, "panic selling": 2.5, "extreme fear": 2.0,
@@ -147,10 +136,10 @@ def decide(current_price, price_history, news_context):
         "recession": -3.0, "crisis": -3.0, "stagflation": -3.0, "hot inflation": -3.0,
         "war": -3.0, "yield curve inversion": -3.5, "quantitative tightening": -2.5,
         "black swan": -4.0, "systemic risk": -4.0, "contagion": -3.5, "credit crunch": -3.5,
-        "rate hike": -2.5, "bankruptcy": -2.5, "hard landing": -2.5, "geopolitical risk": -2.5,
+        "rate hike": -2.5, "bankruptcy": -2.5, "hard landing": -2.5, "geopolitical tension": -2.5,
         "cpi beat": -2.5, "vix spike": -2.5, "hawkish": -2.0, "bearish": -2.0,
         "sell-off": -2.0, "weak earnings": -2.0, "market turmoil": -2.0, "bubble": -2.0,
-        "uncertainty": -1.5,
+        "uncertainty": -1.5, "debt ceiling": -2.0,
         "euphoria": -2.5, "mania": -3.0, "irrational exuberance": -3.0, "extreme greed": -2.5,
     }
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent"]
@@ -172,10 +161,10 @@ def decide(current_price, price_history, news_context):
     ATR_PERIOD = 14
     ADX_PERIOD = 14
     BB_PERIOD = 20
-    CHANDELIER_LOOKBACK = 22
-    CHANDELIER_ATR_MULT = 3.0
+    ROC_CRASH_PERIOD = 20
+    STOP_LOSS_LOOKBACK = 20
 
-    required_history_length = max(SMA_TREND_LONG + 1, 2 * ADX_PERIOD, CHANDELIER_LOOKBACK + 1)
+    required_history_length = max(SMA_TREND_LONG + 1, 2 * ADX_PERIOD, 50)
     if len(all_prices) < required_history_length:
         return "HOLD"
 
@@ -186,11 +175,12 @@ def decide(current_price, price_history, news_context):
     _, _, macd_hist_series = calculate_macd_series(all_prices)
     atr = calculate_atr(all_prices, ATR_PERIOD)
     adx = calculate_adx(all_prices, ADX_PERIOD)
-    bb_upper, _, bb_lower = calculate_bollinger_bands(all_prices, BB_PERIOD)
-    donchian_high_22 = np.max(all_prices[-CHANDELIER_LOOKBACK:])
+    upper_bb, _, _, bb_width = calculate_bollinger_bands(all_prices, BB_PERIOD)
+    roc_20 = calculate_roc(all_prices, ROC_CRASH_PERIOD)
+    donchian_high_20 = np.max(all_prices[-STOP_LOSS_LOOKBACK:])
 
     # Null check for all indicators
-    if any(v is None for v in [sma_100, sma_50, rsi, atr, adx, bb_lower, donchian_high_22]) or macd_hist_series is None or len(macd_hist_series) < 2:
+    if any(v is None for v in [sma_100, sma_50, rsi, atr, adx, upper_bb, roc_20]) or macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
 
     macd_histogram = macd_hist_series[-1]
@@ -199,59 +189,62 @@ def decide(current_price, price_history, news_context):
 
     # --- 3. Regime Detection ---
     is_long_term_downtrend = current_price < sma_100
-    is_crisis_regime = is_long_term_downtrend and current_price < sma_50
+    is_crash_velocity = roc_20 < -15.0
+    is_crisis_regime = is_long_term_downtrend or is_crash_velocity
 
-    # Capitulation Regime: Extreme oversold state, often a precursor to a sharp bounce.
-    is_deeply_oversold_rsi = rsi < 25
-    is_below_bollinger = current_price < bb_lower
-    is_capitulation_candidate = is_deeply_oversold_rsi and is_below_bollinger
+    is_deeply_oversold = rsi < 25
+    is_extreme_crash_velocity = roc_20 < -18.0
+    is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold
 
     # --- 4. Decision Logic (Hierarchical) ---
 
     # REGIME 1: CONTRARIAN CAPITULATION (HIGHEST PRIORITY)
-    # Buy on signs of extreme fear, but only when momentum shows a nascent turn.
     if is_capitulation_candidate and macd_hist_delta > 0:
         return "BUY"
 
     # REGIME 2: CRISIS AVERSION
-    # If in a confirmed long-term downtrend, be defensive and exit positions.
     if is_crisis_regime:
-        return "SELL"
-
-    # REGIME 3: NORMAL MARKET CONDITIONS (TREND-FILTERED)
-
-    # --- SELL LOGIC (Risk Management First) ---
-    # Priority 1: Dynamic ATR Chandelier Stop-Loss.
-    chandelier_exit = donchian_high_22 - (atr * CHANDELIER_ATR_MULT)
-    if current_price < chandelier_exit:
-        return "SELL"
-
-    # Priority 2: Standard trend breakdown signal.
-    is_trend_breakdown = current_price < sma_50
-    is_momentum_crossing_down = macd_histogram < 0 and prev_macd_histogram >= 0
-    if is_trend_breakdown and is_momentum_crossing_down:
-        return "SELL"
-
-    # Priority 3: Profit-taking on overbought conditions with FADING momentum.
-    is_momentum_fading = macd_hist_delta < 0
-    is_overbought = rsi > 78
-    if is_overbought and is_momentum_fading:
-        return "SELL"
-
-    # --- ADX TREND STRENGTH FILTER ---
-    # Before considering any new BUY signals, ensure a trend is established.
-    is_trending = adx > 22
-    if not is_trending:
+        if macd_histogram < 0 or current_price < sma_50:
+            return "SELL"
         return "HOLD"
 
-    # --- BUY LOGIC (Only in a confirmed trending market) ---
-    is_primary_uptrend = current_price > sma_50
-    is_momentum_crossing_up = macd_histogram > 0 and prev_macd_histogram <= 0
-    is_not_overbought = rsi < 75
-    is_sentiment_permissive = net_sentiment_score > -3.0
+    # REGIME 3: NORMAL MARKET CONDITIONS
 
-    if is_primary_uptrend and is_momentum_crossing_up and is_not_overbought and is_sentiment_permissive:
+    # --- SELL LOGIC (Risk Management First) ---
+    # Priority 1: Dynamic ATR Stop-Loss.
+    if current_price < (donchian_high_20 - atr * 3.0):
+        return "SELL"
+
+    # Priority 2: Trend breakdown signal, confirmed by ADX.
+    is_trending = adx > 22
+    is_primary_downtrend = current_price < sma_50
+    is_momentum_confirming_down = macd_histogram < 0 and prev_macd_histogram >= 0
+    if is_primary_downtrend and is_momentum_confirming_down and is_trending:
+        return "SELL"
+
+    # Priority 3: Profit-taking on extreme overbought conditions with FADING momentum.
+    is_momentum_fading = macd_hist_delta < 0
+    is_extremely_overbought = rsi > 82
+    if is_extremely_overbought and is_momentum_fading:
+        return "SELL"
+
+    # --- BUY LOGIC ---
+    # Priority 1: Trend Following, confirmed by ADX.
+    is_primary_uptrend = current_price > sma_50
+    is_momentum_confirming_up = macd_histogram > 0 and prev_macd_histogram <= 0
+    is_not_overbought = rsi < 78
+    is_sentiment_permissive_for_buy = net_sentiment_score > -3.0
+    if is_primary_uptrend and is_momentum_confirming_up and is_trending and is_not_overbought and is_sentiment_permissive_for_buy:
         return "BUY"
+        
+    # Priority 2: Bollinger Band Squeeze Breakout.
+    # Look back over the last 10 days of BB width history to find the minimum.
+    bb_width_history = [calculate_bollinger_bands(all_prices[:-i], BB_PERIOD)[3] for i in range(1, 11)]
+    bb_width_history = [w for w in bb_width_history if w is not None]
+    if len(bb_width_history) > 0:
+        is_bb_squeeze = bb_width < (min(bb_width_history) * 1.1) # Current width is near 10-day lows
+        if is_bb_squeeze and current_price > upper_bb and is_not_overbought:
+            return "BUY"
 
     # Default action is to hold the current position.
     return "HOLD"
