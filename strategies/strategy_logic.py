@@ -121,6 +121,12 @@ def calculate_sma(prices, period):
         return None
     return np.mean(prices[-period:])
 
+def calculate_ema(prices, period):
+    """Calculates the Exponential Moving Average (EMA) for the latest price."""
+    if len(prices) < period:
+        return None
+    return calculate_ema_series(prices, period)[-1]
+
 def decide(current_price, price_history, news_context):
     context_lower = news_context.lower()
     sentiment_keywords = {
@@ -169,6 +175,7 @@ def decide(current_price, price_history, news_context):
     sma_100 = calculate_sma(all_prices, sma_trend_long)
     sma_50 = calculate_sma(all_prices, sma_trend_medium)
     rsi = calculate_rsi(all_prices, rsi_period)
+    ema_50 = calculate_ema(all_prices, 50)
     macd_line, signal_line, macd_hist_series = calculate_macd_series(all_prices)
     short_atr = calculate_atr(all_prices, atr_short)
     long_atr = calculate_atr(all_prices, atr_long)
