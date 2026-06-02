@@ -68,6 +68,15 @@ def calculate_roc(prices, period=20):
         return 0.0
     return ((prices[-1] - prices[-1 - period]) / prices[-1 - period]) * 100
 
+def calculate_donchian_channel(prices, period=20):
+    if len(prices) < period:
+        return None, None
+    donchian_high = np.max(prices[-period:])
+    donchian_low = np.min(prices[-period:])
+    upper_band = donchian_high
+    lower_band = donchian_low
+    return upper_band, lower_band
+
 def calculate_bollinger_bands(prices, period=20, std_dev=2):
     if len(prices) < period:
         return None, None
@@ -83,29 +92,6 @@ def calculate_stochastic_oscillator(prices, period=14):
     lowest_low = np.min(prices[-period:])
     highest_high = np.max(prices[-period:])
     return ((prices[-1] - lowest_low) / (highest_high - lowest_low)) * 100
-
-def calculate_force_index(prices, volume):
-    if len(prices) < 2 or len(volume) < 2:
-        return None
-    return np.sum(np.diff(prices) * np.diff(volume)) / len(volume)
-
-def calculate_keltner_channel(prices, period=20):
-    if len(prices) < period:
-        return None, None
-    sma = np.mean(prices[-period:])
-    atr = calculate_atr(prices, period)
-    upper_band = sma + (atr * 2)
-    lower_band = sma - (atr * 2)
-    return upper_band, lower_band
-
-def calculate_donchian_channel(prices, period=20):
-    if len(prices) < period:
-        return None, None
-    donchian_high = np.max(prices[-period:])
-    donchian_low = np.min(prices[-period:])
-    upper_band = donchian_high
-    lower_band = donchian_low
-    return upper_band, lower_band
 
 def calculate_sentiment_score(news_context):
     context_lower = news_context.lower()
