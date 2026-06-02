@@ -38,7 +38,7 @@ def calculate_macd_series(prices, short_period=12, long_period=26, signal_period
         return macd_line, None, None
     signal_line = calculate_ema_series(macd_line, signal_period)
     if len(signal_line) == 0:
-        return macd_line, None, None
+        return mac. line, None, None
     histogram = macd_line[len(macd_line)-len(signal_line):] - signal_line
     return macd_line, signal_line, histogram
 
