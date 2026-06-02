@@ -14,7 +14,6 @@ def calculate_ema_series(data, period):
     if len(data) < period:
         return np.array([])
     data_arr = np.array(data, dtype=float)
-    # Correctly initialize the EMA series to handle the length difference
     ema_values = np.zeros(len(data_arr) - period + 1, dtype=float)
     ema_values[0] = np.mean(data_arr[:period])
     multiplier = 2 / (period + 1)
@@ -42,12 +41,8 @@ def calculate_rsi(prices, period=14):
     seed_gains = deltas[:period][deltas[:period] >= 0].sum()
     seed_losses = -deltas[:period][deltas[:period] < 0].sum()
     
-    # Handle the case where there are no losses in the initial period
-    if seed_losses == 0:
-        avg_loss = 0.0
-    else:
-        avg_loss = seed_losses / period
     avg_gain = seed_gains / period
+    avg_loss = seed_losses / period
     
     for i in range(period, len(deltas)):
         delta = deltas[i]
@@ -71,7 +66,7 @@ def calculate_macd_series(prices, short_period=12, long_period=26, signal_period
     short_ema_series = calculate_ema_series(prices, short_period)
     long_ema_series = calculate_ema_series(prices, long_period)
     
-    # Align series by slicing the longer one to match the shorter one's start
+    # Align series by slicing the longer one
     macd_line = short_ema_series[len(short_ema_series)-len(long_ema_series):] - long_ema_series
     
     if len(macd_line) < signal_period:
@@ -100,8 +95,8 @@ def calculate_bollinger_bands(prices, period=20, num_std_dev=2):
 
 def decide(current_price, price_history, news_context):
     """
-    A self-improved, multi-regime trading strategy with proactive exit logic
-    and enhanced signal confirmation to improve robustness.
+    A self-improved, multi-regime trading strategy focusing on high-conviction
+    signals and logical symmetry to reduce noise and improve robustness.
 
     Parameters:
         current_price (float): The current day's closing price for SPY.
@@ -111,40 +106,35 @@ def decide(current_price, price_history, news_context):
     Returns:
         str: "BUY", "SELL", or "HOLD"
     """
-    # --- 1. Enhanced Sentiment Analysis ---
+    # --- 1. Sentiment Analysis (Updated Dictionary) ---
     context_lower = news_context.lower()
     sentiment_keywords = {
+        # Positive
         "fed pivot": 3.0, "rate cut": 2.5, "stimulus": 2.0, "soft landing": 2.0,
         "dovish": 2.0, "record high": 2.0, "bullish": 2.0, "surge": 2.0,
         "strong earnings": 2.0, "cooling inflation": 1.5, "disinflation": 1.5,
-        "ai boom": 2.0, "technological breakthrough": 2.0, "easing tensions": 1.5,
+        "ai boom": 2.5, "ai revolution": 2.5, "productivity boom": 2.0,
+        "technological breakthrough": 2.0, "easing tensions": 1.5, "debt deal": 1.5,
         "beat": 1.5, "growth": 1.5, "recovery": 1.5, "upgrade": 1.5, "strong jobs": 2.0,
-        "consumer confidence": 1.5, "supply chain easing": 1.5,
+        "consumer confidence": 1.5,
+        # Negative
         "rate hike": -2.5, "recession": -2.5, "crisis": -2.5, "bankruptcy": -2.5,
         "hard landing": -2.5, "stagflation": -2.5, "hawkish": -2.0, "bearish": -2.0,
         "plunge": -2.0, "inflation": -2.0, "sell-off": -2.0, "weak earnings": -2.0,
         "geopolitical risk": -2.0, "market turmoil": -2.0, "credit crunch": -2.5,
+        "credit downgrade": -3.0, "bank run": -3.0, "debt ceiling crisis": -2.5,
+        "inverted yield curve": -2.0,
         "tightening": -1.5, "miss": -1.5, "downgrade": -1.5, "tariff": -1.5,
         "supply chain disruption": -1.5, "uncertainty": -1.5, "weak jobs": -2.0
     }
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids"]
-    # **IMPROVEMENT**: Moderator words reduce the impact of speculative news
-    moderator_words = ["may", "could", "potential", "possible", "risk of", "chance of", "might"]
     net_sentiment_score = 0.0
     for keyword, weight in sentiment_keywords.items():
         pattern = r'\b' + re.escape(keyword) + r'\b'
         for match in re.finditer(pattern, context_lower):
             pre_context = context_lower[max(0, match.start() - 30):match.start()]
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
-            is_moderated = any(mod_word in pre_context for mod_word in moderator_words)
-            
-            current_weight = weight
-            if is_negated:
-                current_weight = -current_weight
-            if is_moderated:
-                current_weight *= 0.5 # Reduce impact by 50% if speculative
-            
-            net_sentiment_score += current_weight
+            net_sentiment_score += -weight if is_negated else weight
 
     # --- 2. Technical Indicators & Adaptive Regime Detection ---
     all_prices = price_history + [current_price]
@@ -177,6 +167,7 @@ def decide(current_price, price_history, news_context):
     log_returns = np.log(np.array(all_prices)[1:] / np.array(all_prices)[:-1])
     short_term_vol = np.std(log_returns[-VOL_SHORT_PERIOD:])
     long_term_vol = np.std(log_returns[-VOL_LONG_PERIOD:])
+    # A daily std dev of 0.015 corresponds to ~23.8% annualized volatility.
     is_high_volatility = (short_term_vol > long_term_vol * 1.5) and (short_term_vol > 0.015)
 
     # --- 3. Multi-Regime Decision Logic ---
@@ -193,7 +184,7 @@ def decide(current_price, price_history, news_context):
         elif net_sentiment_score <= BEARISH_SENTIMENT_THRESHOLD and bearish_trend and macd_histogram < 0 and rsi > 35:
             return "SELL"
     else:
-        # === NORMAL MODE: Adaptive with Enhanced Confirmation ===
+        # === NORMAL MODE: Adaptive with Improved Signal Conviction ===
         trend_strength = abs(short_ema - long_ema) / long_ema
         is_choppy_market = trend_strength < 0.005
 
@@ -207,16 +198,17 @@ def decide(current_price, price_history, news_context):
             if bullish_trend and rsi > 78 and is_momentum_fading:
                 return "SELL"
 
-            # **IMPROVEMENT**: Entry requires momentum *acceleration* for higher conviction
-            is_momentum_accelerating_bullish = macd_histogram > 0 and macd_histogram > prev_macd_histogram
-            if bullish_trend and is_momentum_accelerating_bullish and rsi < 75 and net_sentiment_score > -1.5:
+            # **IMPROVEMENT**: Higher-conviction entry using MACD crossover.
+            # Buy only when momentum newly confirms the trend.
+            is_bullish_crossover = macd_histogram > 0 and prev_macd_histogram <= 0
+            if bullish_trend and is_bullish_crossover and rsi < 75 and net_sentiment_score > -1.5:
                 return "BUY"
             
-            is_momentum_accelerating_bearish = macd_histogram < 0 and macd_histogram < prev_macd_histogram
-            if bearish_trend and is_momentum_accelerating_bearish and rsi > 25 and net_sentiment_score < 1.5:
+            # Standard sell signal for bearish trend (Unchanged)
+            if bearish_trend and macd_histogram < 0 and rsi > 25 and net_sentiment_score < 1.5:
                 return "SELL"
         else:
-            # Sub-Regime: Choppy / Ranging Market
+            # Sub-Regime: Choppy / Ranging Market (Mean-Reversion with improved symmetry)
             MEDIUM_TERM_SMA_PERIOD = 50
             if len(all_prices) < MEDIUM_TERM_SMA_PERIOD:
                 return "HOLD"
@@ -225,12 +217,13 @@ def decide(current_price, price_history, news_context):
             if medium_sma is None:
                 return "HOLD"
 
-            # Buy the dip if confirmed by RSI, BBands, and medium-term trend is up
+            # Buy the dip if confirmed by RSI, BBands, and medium-term trend is not bearish
             if (rsi < 30 and current_price < lower_band) and \
                (net_sentiment_score > -2.0) and (current_price > medium_sma):
                 return "BUY"
-            
-            # **IMPROVEMENT**: Sell the rip only if medium-term trend is NOT up, preventing premature selling in a strong bull market
+                
+            # **IMPROVEMENT**: Symmetric sell logic.
+            # Sell the rip only if the medium-term trend is not bullish.
             elif (rsi > 70 and current_price > upper_band) and \
                  (net_sentiment_score < 2.0) and (current_price < medium_sma):
                 return "SELL"
