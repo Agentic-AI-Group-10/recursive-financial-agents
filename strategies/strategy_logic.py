@@ -208,22 +208,6 @@ def calculate_ichimoku_cloud(prices, period=26):
     chikou_span = prices[-26:]
     return tenkan_sen, kijun_sen, senkou_span_a, senkou_span_b, chikou_span
 
-def calculate_kst(prices, period=10):
-    """Calculates the KST (Know Sure Thing) indicator."""
-    if len(prices) < period:
-        return None
-    kst_values = np.zeros(len(prices), dtype=float)
-    for i in range(period):
-        kst_values[i] = calculate_ema(prices[:i+1], 10)[-1]
-    return kst_values
-
-def calculate_kst_signal(prices, period=10):
-    """Calculates the KST signal."""
-    if len(prices) < period:
-        return None
-    kst_signal = calculate_ema(kst_values, 10)[-1]
-    return kst_signal
-
 def decide(current_price, price_history, news_context):
     context_lower = news_context.lower()
     sentiment_score = calculate_sentiment_score(news_context)
@@ -249,8 +233,6 @@ def decide(current_price, price_history, news_context):
     fi = calculate_force_index(all_prices, all_volumes)
     keltner_upper_band, keltner_lower_band = calculate_keltner_channel(all_prices)
     tenkan_sen, kijun_sen, senkou_span_a, senkou_span_b, chikou_span = calculate_ichimoku_cloud(all_prices)
-    kst_values = calculate_kst(all_prices, 10)
-    kst_signal = calculate_kst_signal(all_prices, 10)
 
     if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, upper_band, lower_band, stochastic_oscillator, fi]) or \
        macd_hist_series is None or len(macd_hist_series) < 2:
@@ -314,9 +296,8 @@ def decide(current_price, price_history, news_context):
     is_sufficient_volatility = short_atr > (long_atr * 0.6) 
     is_price_in_bollinger_band = current_price > lower_band and current_price < upper_band
     is_price_in_keltner_channel = current_price > keltner_lower_band and current_price < keltner_upper_band
-    is_kst_signal = kst_signal > 0
 
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_bollinger_band and is_price_in_keltner_channel and stochastic_oscillator > 20 and is_kst_signal:
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_bollinger_band and is_price_in_keltner_channel and stochastic_oscillator > 20:
         return "BUY"
 
     return "HOLD"
