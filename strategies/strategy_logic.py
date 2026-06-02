@@ -4,6 +4,12 @@ import math
 
 # --- Helper Functions for Technical Indicators ---
 
+def calculate_sma(prices, period):
+    """Calculates the Simple Moving Average (SMA) for the latest price."""
+    if len(prices) < period:
+        return None
+    return np.mean(prices[-period:])
+
 def calculate_ema_series(data, period):
     """Calculates a full series of Exponential Moving Averages."""
     if len(data) < period:
@@ -11,8 +17,10 @@ def calculate_ema_series(data, period):
     data_arr = np.array(data, dtype=float)
     try:
         import pandas as pd
+        # Using pandas if available for a robust, standard implementation
         return pd.Series(data_arr).ewm(span=period, adjust=False).mean().to_numpy()[period-1:]
     except ImportError:
+        # Fallback to a manual calculation if pandas is not installed
         ema_values = np.zeros(len(data_arr) - period + 1, dtype=float)
         ema_values[0] = np.mean(data_arr[:period])
         multiplier = 2 / (period + 1)
@@ -113,8 +121,8 @@ def calculate_donchian_channels(prices, period=20):
 
 def decide(current_price, price_history, news_context):
     """
-    A self-improved strategy incorporating a long-term trend filter to prevent
-    catastrophic failure in high-volatility bear markets.
+    A self-improved, multi-regime trading strategy featuring a structural bear market
+    filter to prevent catastrophic drawdowns observed in past models.
 
     Parameters:
         current_price (float): The current day's closing price for SPY.
@@ -124,7 +132,7 @@ def decide(current_price, price_history, news_context):
     Returns:
         str: "BUY", "SELL", or "HOLD"
     """
-    # --- 1. Sentiment Analysis (Refined with fear/greed keywords) ---
+    # --- 1. Sentiment Analysis (Enhanced with market psychology keywords) ---
     context_lower = news_context.lower()
     sentiment_keywords = {
         # Strong Positive
@@ -132,22 +140,22 @@ def decide(current_price, price_history, news_context):
         "cooling inflation": 2.5, "cpi miss": 2.5, "ai boom": 2.5, "capitulation": 2.0,
         # Moderate Positive
         "stimulus": 2.0, "dovish": 2.0, "record high": 2.0, "bullish": 2.0, "surge": 2.0,
-        "strong earnings": 2.0, "disinflation": 2.0, "market rally": 2.0, "vix crush": 2.0,
+        "strong earnings": 2.0, "disinflation": 2.0, "market rally": 2.0,
         # Mild Positive
         "beat estimates": 1.5, "growth": 1.5, "recovery": 1.5, "upgrade": 1.5, "de-escalation": 2.0,
-        "easing tensions": 1.5, "consumer confidence": 1.5, "weak jobs report": 1.5,
-        # Extreme Negative (Fear)
-        "panic": -4.0, "crash": -4.0, "contagion": -4.0, "liquidation": -3.5, "crisis": -3.5,
-        "yield curve inversion": -3.5, "recession": -3.0, "stagflation": -3.0, "hot inflation": -3.0,
-        "war": -3.0, "conflict": -3.0, "quantitative tightening": -2.5,
+        "easing tensions": 1.5, "consumer confidence": 1.5, "weak jobs report": 1.5, # Nuanced: good for rates
+        # Strong Negative
+        "panic": -3.5, "recession": -3.0, "crisis": -3.0, "stagflation": -3.0, "hot inflation": -3.0,
+        "war": -3.0, "conflict": -3.0, "yield curve inversion": -3.5, "quantitative tightening": -2.5,
         # Moderate Negative
         "rate hike": -2.5, "bankruptcy": -2.5, "hard landing": -2.5, "geopolitical risk": -2.5,
         "sanctions": -2.5, "credit crunch": -2.5, "cpi beat": -2.5, "vix spike": -2.5,
-        # Mild Negative / Contrarian Greed
-        "euphoria": -2.0, "mania": -2.0, "bubble": -2.0, "hawkish": -2.0, "bearish": -2.0,
-        "plunge": -2.0, "sell-off": -2.0, "weak earnings": -2.0, "market turmoil": -2.0,
-        "tightening": -1.5, "miss estimates": -1.5, "downgrade": -1.5, "tariff": -1.5,
-        "uncertainty": -1.5, "strong jobs report": -1.5,
+        "supply chain disruption": -2.5, "geopolitical tensions": -2.5,
+        # Mild Negative
+        "hawkish": -2.0, "bearish": -2.0, "plunge": -2.0, "sell-off": -2.0, "weak earnings": -2.0,
+        "market turmoil": -2.0, "bubble": -2.0, "euphoria": -2.0, # Contrarian negative
+        "tightening": -1.5, "miss estimates": -1.5, "downgrade": -1.5, "uncertainty": -1.5,
+        "strong jobs report": -1.5, # Nuanced: bad for rates
     }
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent"]
     net_sentiment_score = 0.0
@@ -161,9 +169,10 @@ def decide(current_price, price_history, news_context):
     # --- 2. Technical Indicators & Adaptive Regime Detection ---
     all_prices = price_history + [current_price]
     
+    # Indicator Periods
     SHORT_EMA_PERIOD = 12
     LONG_EMA_PERIOD = 26
-    VERY_LONG_EMA_PERIOD = 200 # **NEW** Long-term trend filter
+    SMA_200_PERIOD = 200 # **NEW** Structural regime filter
     RSI_PERIOD = 14
     BB_PERIOD = 20
     DONCHIAN_PERIOD = 20
@@ -172,14 +181,14 @@ def decide(current_price, price_history, news_context):
     ATR_REGIME_LONG = 50
     TREND_CONSISTENCY_PERIOD = 20
 
-    required_history_length = max(LONG_EMA_PERIOD + 9, ATR_REGIME_LONG + 1, VERY_LONG_EMA_PERIOD + 1)
+    required_history_length = max(LONG_EMA_PERIOD + 9, ATR_REGIME_LONG + 1, SMA_200_PERIOD)
     if len(all_prices) < required_history_length:
         return "HOLD"
 
     # Calculate core indicators
     short_ema = calculate_ema(all_prices, SHORT_EMA_PERIOD)
     long_ema = calculate_ema(all_prices, LONG_EMA_PERIOD)
-    long_term_ema = calculate_ema(all_prices, VERY_LONG_EMA_PERIOD) # **NEW**
+    sma_200 = calculate_sma(all_prices, SMA_200_PERIOD)
     rsi = calculate_rsi(all_prices, RSI_PERIOD)
     prev_rsi = calculate_rsi(all_prices[:-1], RSI_PERIOD)
     _, upper_band, lower_band = calculate_bollinger_bands(all_prices, BB_PERIOD)
@@ -190,63 +199,65 @@ def decide(current_price, price_history, news_context):
     trend_consistency = calculate_trend_consistency(all_prices, TREND_CONSISTENCY_PERIOD)
     roc = calculate_roc(all_prices, ROC_PERIOD)
 
-    if any(v is None for v in [short_ema, long_ema, long_term_ema, rsi, prev_rsi, upper_band, lower_band, upper_donchian, lower_donchian, short_atr, long_atr, trend_consistency, roc]) or macd_hist_series is None or len(macd_hist_series) < 3:
+    if any(v is None for v in [short_ema, long_ema, sma_200, rsi, prev_rsi, upper_band, lower_band, upper_donchian, lower_donchian, short_atr, long_atr, trend_consistency, roc]) or macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
     
     macd_histogram = macd_hist_series[-1]
     prev_macd_histogram = macd_hist_series[-2]
 
-    # --- Regime Detection ---
-    is_long_term_bullish = current_price > long_term_ema # **NEW** Market Health Indicator
-    is_high_volatility = short_atr > (long_atr * 1.7) # Slightly higher threshold
-    is_trending_market = trend_consistency < 1.25
+    # --- 3. Define Market States / Regimes ---
+    is_structural_bear_market = current_price < sma_200
+    is_high_volatility = short_atr > (long_atr * 1.7)
+    is_trending_market = trend_consistency < 1.2
 
-    # --- 3. Multi-Regime Decision Logic ---
+    # --- 4. Hierarchical Decision Logic ---
 
-    # **IMPROVEMENT**: CRASH PROTECTION OVERRIDE
-    # If volatility is high AND we are in a long-term bear market, be extremely defensive.
-    if is_high_volatility and not is_long_term_bullish:
-        # Only look for reasons to sell or stay in cash. Do not buy dips.
-        if short_ema < long_ema and rsi < 45 and net_sentiment_score < 1.0:
+    # === PRIMARY OVERRIDE: STRUCTURAL BEAR MARKET (CAPITAL PRESERVATION MODE) ===
+    # Addresses the primary failure from past lessons: premature dip-buying in a sustained crash.
+    if is_structural_bear_market:
+        is_breaking_down = current_price < lower_donchian and roc < -1.0
+        if is_breaking_down and net_sentiment_score < 1.0 and short_ema < long_ema:
             return "SELL"
-        return "HOLD"
-
-    # --- NORMAL & VOLATILE-UPTREND MODES ---
-    if is_trending_market:
-        # Sub-Regime: Trending Market
-        bullish_trend = short_ema > long_ema
-        bearish_trend = short_ema < long_ema
         
-        # Profit-taking / Exit signal for long positions
-        is_momentum_fading_up = macd_histogram > 0 and macd_histogram < prev_macd_histogram
-        if bullish_trend and (rsi > 78 or current_price > upper_band) and is_momentum_fading_up:
-            return "SELL"
+        # High-risk contrarian BUYs are disabled by default in a bear market.
+        # Only an exceptionally strong, multi-factor reversal signal would be considered.
+        is_reversing_up = macd_histogram > prev_macd_histogram and macd_histogram < 0
+        if rsi < 25 and is_reversing_up and net_sentiment_score > 4.5:
+             return "BUY" # Rare, high-conviction capitulation buy.
+        
+        return "HOLD" # Default action in a bear market is to hold cash.
 
-        # BUY Signal: Must be in a long-term uptrend with confirming momentum.
-        if is_long_term_bullish and bullish_trend and macd_histogram > 0 and prev_macd_histogram > 0 and \
-           rsi < 75 and rsi > prev_rsi and roc > 0.25 and net_sentiment_score > -2.0:
+    # === NORMAL MARKET LOGIC (Price > SMA_200) ===
+    if is_high_volatility:
+        # Sub-Regime: High-Volatility Bull Market (e.g., sharp correction, V-recovery)
+        BULLISH_SENTIMENT_THRESHOLD = 3.5
+        BEARISH_SENTIMENT_THRESHOLD = -3.5
+        if net_sentiment_score >= BULLISH_SENTIMENT_THRESHOLD and short_ema > long_ema and macd_histogram > 0 and rsi < 75:
             return "BUY"
-        
-        # SELL Signal: Trend is down, momentum confirms.
-        if bearish_trend and macd_histogram < 0 and prev_macd_histogram < 0 and \
-           rsi > 25 and rsi < prev_rsi and roc < -0.25 and net_sentiment_score < 2.0:
+        elif net_sentiment_score <= BEARISH_SENTIMENT_THRESHOLD and short_ema < long_ema and macd_histogram < 0 and rsi > 25:
             return "SELL"
     else:
-        # Sub-Regime: Ranging / Choppy Market (Mean-Reversion Logic)
-        is_reversing_up = macd_histogram > prev_macd_histogram
-        is_at_donchian_low = abs(current_price - lower_donchian) < (short_atr * 0.3)
-        
-        # BUY Signal: Only buy oversold dips if the long-term trend is healthy.
-        if is_long_term_bullish and rsi < 35 and current_price < lower_band and is_at_donchian_low and \
-           net_sentiment_score > -3.0 and is_reversing_up and rsi > prev_rsi:
-            return "BUY"
-            
-        is_reversing_down = macd_histogram < prev_macd_histogram
-        is_at_donchian_high = abs(current_price - upper_donchian) < (short_atr * 0.3)
-        
-        # SELL Signal: Sell overbought rallies.
-        if rsi > 65 and current_price > upper_band and is_at_donchian_high and \
-           net_sentiment_score < 3.0 and is_reversing_down and rsi < prev_rsi:
-            return "SELL"
+        if is_trending_market:
+            # Sub-Regime: Normal Trending Bull Market
+            is_momentum_fading_up = macd_histogram > 0 and macd_histogram < prev_macd_histogram
+            if (rsi > 78 or current_price > upper_band) and is_momentum_fading_up:
+                return "SELL" # Take profit on signs of exhaustion
+
+            is_pullback_buy = short_ema > long_ema and macd_histogram > 0 and rsi < 75 and roc > 0.1
+            if is_pullback_buy and net_sentiment_score > -2.5:
+                return "BUY"
+        else:
+            # Sub-Regime: Choppy / Ranging Market (Mean-Reversion Logic)
+            is_reversing_up = macd_histogram > prev_macd_histogram
+            is_at_donchian_low = abs(current_price - lower_donchian) < (short_atr * 0.25)
+            if rsi < 35 and current_price < lower_band and is_at_donchian_low and \
+               net_sentiment_score > -3.0 and is_reversing_up and rsi > prev_rsi:
+                return "BUY"
+                
+            is_reversing_down = macd_histogram < prev_macd_histogram
+            is_at_donchian_high = abs(current_price - upper_donchian) < (short_atr * 0.25)
+            if rsi > 65 and current_price > upper_band and is_at_donchian_high and \
+               net_sentiment_score < 3.0 and is_reversing_down and rsi < prev_rsi:
+                return "SELL"
 
     return "HOLD"
