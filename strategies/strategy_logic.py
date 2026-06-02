@@ -2,7 +2,7 @@ import numpy as np
 import re
 import math
 
-# --- Helper Functions for Technical Indicators (Self-Improved with EMA Slope) ---
+# --- Helper Functions for Technical Indicators (Self-Improved with Slope) ---
 
 def calculate_ema_series(data, period):
     """Calculates a full series of Exponential Moving Averages."""
@@ -18,7 +18,7 @@ def calculate_ema_series(data, period):
         multiplier = 2 / (period + 1)
         for i in range(period, len(data_arr)):
             ema_values[i] = (data_arr[i] - ema_values[i-1]) * multiplier + ema_values[i-1]
-        return ema_values[period-1:]
+        return ema_values
 
 def calculate_rsi(prices, period=14):
     """Calculates the Relative Strength Index (RSI) using Wilder's smoothing method."""
@@ -45,16 +45,13 @@ def calculate_macd_series(prices, short_period=12, long_period=26, signal_period
     """Calculates the MACD line, signal line, and histogram series."""
     if len(prices) < long_period:
         return None, None, None
-    short_ema_full_series = calculate_ema_series(prices, short_period)
-    long_ema_full_series = calculate_ema_series(prices, long_period)
-    
-    # Align series by taking the tail of the shorter period's EMA
-    macd_line = short_ema_full_series[long_period-short_period:] - long_ema_full_series
-    
+    ema_series_short = calculate_ema_series(prices, short_period)
+    ema_series_long = calculate_ema_series(prices, long_period)
+    macd_line = ema_series_short[long_period-1:] - ema_series_long[long_period-1:]
     if len(macd_line) < signal_period:
         return macd_line, None, None
-    
-    signal_line = calculate_ema_series(macd_line, signal_period)
+    signal_line_full = calculate_ema_series(macd_line, signal_period)
+    signal_line = signal_line_full[signal_period-1:]
     histogram = macd_line[len(macd_line)-len(signal_line):] - signal_line
     return macd_line, signal_line, histogram
 
@@ -75,21 +72,37 @@ def calculate_atr(prices, period=14):
         return None
     prices_arr = np.array(prices, dtype=float)
     price_ranges = np.abs(np.diff(prices_arr))
-    atr_series = calculate_ema_series(price_ranges, period)
-    return atr_series[-1] if len(atr_series) > 0 else None
+    atr_series_full = calculate_ema_series(price_ranges, period)
+    return atr_series_full[-1] if len(atr_series_full) > 0 else None
 
-def calculate_ema_slope(ema_series, period=5):
-    """Calculates the slope of an EMA series over a short period."""
-    if len(ema_series) < period:
+def calculate_trend_consistency(prices, period=20):
+    """Calculates a measure of trend consistency (lower is smoother)."""
+    if len(prices) < period + 1:
         return None
-    # Simple slope: (y2 - y1) / (x2 - x1). Here x2-x1 is the period.
-    # We normalize by the last price to make it scale-invariant.
-    return (ema_series[-1] - ema_series[-period]) / (ema_series[-1] * 0.01) if ema_series[-1] != 0 else 0
+    price_changes = np.diff(prices[-period-1:])
+    if not np.any(price_changes): return 1.0
+    std_dev_changes = np.std(price_changes)
+    avg_abs_change = np.mean(np.abs(price_changes))
+    if avg_abs_change == 0: return 1.0
+    return std_dev_changes / avg_abs_change
+
+def calculate_ma_slope(data_series, period=5):
+    """Calculates the slope of the last 'period' points using linear regression."""
+    if len(data_series) < period:
+        return None
+    y = data_series[-period:]
+    x = np.arange(len(y))
+    sum_x, sum_y = np.sum(x), np.sum(y)
+    sum_xy, sum_x2 = np.sum(x * y), np.sum(x * x)
+    n = len(x)
+    denominator = n * sum_x2 - sum_x**2
+    if denominator == 0: return 0.0
+    return (n * sum_xy - sum_x * sum_y) / denominator
 
 def decide(current_price, price_history, news_context):
     """
-    A self-improved strategy using a Signal Strength scoring system to aggregate
-    evidence from multiple technical and sentiment factors, reducing false signals.
+    A self-improved, multi-regime trading strategy using EMA slope for trend
+    confirmation and Bollinger Band Width for ranging market detection.
 
     Parameters:
         current_price (float): The current day's closing price for SPY.
@@ -99,151 +112,119 @@ def decide(current_price, price_history, news_context):
     Returns:
         str: "BUY", "SELL", or "HOLD"
     """
-    # --- 1. Sentiment Analysis (Refined with dampeners and new keywords) ---
+    # --- 1. Sentiment Analysis (Expanded Dictionary) ---
     context_lower = news_context.lower()
     sentiment_keywords = {
         # Strong Positive
-        "fed pivot": 3.5, "rate cut": 3.0, "quantitative easing": 2.5, "soft landing": 2.5,
+        "fed pivot": 3.0, "dovish pivot": 3.0, "rate cut": 2.5, "quantitative easing": 2.5, "soft landing": 2.5,
         "cooling inflation": 2.5, "cpi miss": 2.5, "ai boom": 2.5, "capitulation": 2.0,
         # Moderate Positive
         "stimulus": 2.0, "dovish": 2.0, "record high": 2.0, "bullish": 2.0, "surge": 2.0,
         "strong earnings": 2.0, "disinflation": 2.0, "market rally": 2.0, "vix crush": 2.0,
+        "easing financial conditions": 2.0,
         # Mild Positive
         "beat estimates": 1.5, "growth": 1.5, "recovery": 1.5, "upgrade": 1.5,
         "easing tensions": 1.5, "consumer confidence": 1.5, "weak jobs report": 2.0, "de-escalation": 2.0,
         # Strong Negative
-        "recession": -3.5, "crisis": -3.5, "stagflation": -3.5, "hot inflation": -3.0, "sticky inflation": -3.0,
-        "war": -3.0, "conflict": -3.0, "yield curve inversion": -4.0, "quantitative tightening": -3.0,
+        "credit event": -3.5, "liquidity crisis": -3.5, "yield curve inversion": -3.5,
+        "recession": -3.0, "crisis": -3.0, "stagflation": -3.0, "hot inflation": -3.0, "war": -3.0,
         # Moderate Negative
         "rate hike": -2.5, "bankruptcy": -2.5, "hard landing": -2.5, "geopolitical risk": -2.5,
         "sanctions": -2.5, "credit crunch": -2.5, "cpi beat": -2.5, "euphoria": -2.0, "vix spike": -2.5,
+        "quantitative tightening": -2.5,
         # Mild Negative
         "hawkish": -2.0, "bearish": -2.0, "plunge": -2.0, "sell-off": -2.0, "weak earnings": -2.0,
-        "market turmoil": -2.0, "bubble": -2.0, "tightening": -1.5, "miss estimates": -1.5,
-        "downgrade": -1.5, "tariff": -1.5, "uncertainty": -1.5, "strong jobs report": -2.0, "supply chain disruption": -2.0,
+        "market turmoil": -2.0, "bubble": -2.0, "supply chain disruption": -2.0, "strong jobs report": -2.0,
+        "tightening": -1.5, "miss estimates": -1.5, "downgrade": -1.5, "tariff": -1.5, "uncertainty": -1.5,
     }
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent"]
-    dampener_words = ["may", "could", "potentially", "expects", "forecasts", "might"]
     net_sentiment_score = 0.0
     for keyword, weight in sentiment_keywords.items():
         pattern = r'\b' + re.escape(keyword) + r'\b'
         for match in re.finditer(pattern, context_lower):
             pre_context = context_lower[max(0, match.start() - 30):match.start()]
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
-            is_dampened = any(damp_word in pre_context for damp_word in dampener_words)
-            
-            current_weight = weight
-            if is_negated:
-                current_weight = -weight
-            if is_dampened:
-                current_weight *= 0.6
-            net_sentiment_score += current_weight
+            net_sentiment_score += -weight if is_negated else weight
 
-    # --- 2. Technical Indicators & Regime Detection ---
+    # --- 2. Technical Indicators & Adaptive Regime Detection ---
     all_prices = price_history + [current_price]
     
     SHORT_EMA_PERIOD = 12
-    LONG_EMA_PERIOD = 50 # Lengthened for more stable trend identification
+    LONG_EMA_PERIOD = 26
     RSI_PERIOD = 14
     BB_PERIOD = 20
     ATR_REGIME_SHORT = 10
     ATR_REGIME_LONG = 50
-    
-    required_history_length = max(LONG_EMA_PERIOD + 9, ATR_REGIME_LONG + 1)
+    TREND_CONSISTENCY_PERIOD = 20
+    SLOPE_PERIOD = 5
+
+    required_history_length = max(LONG_EMA_PERIOD + 9, ATR_REGIME_LONG + 1, TREND_CONSISTENCY_PERIOD + 2, LONG_EMA_PERIOD + SLOPE_PERIOD)
     if len(all_prices) < required_history_length:
         return "HOLD"
 
     # Calculate core indicators
-    short_ema_series = calculate_ema_series(all_prices, SHORT_EMA_PERIOD)
-    long_ema_series = calculate_ema_series(all_prices, LONG_EMA_PERIOD)
+    ema_series_long = calculate_ema_series(all_prices, LONG_EMA_PERIOD)
+    short_ema = calculate_ema_series(all_prices, SHORT_EMA_PERIOD)[-1]
+    long_ema = ema_series_long[-1]
+    long_ema_slope = calculate_ma_slope(ema_series_long, SLOPE_PERIOD) # **NEW INDICATOR**
+    
     rsi = calculate_rsi(all_prices, RSI_PERIOD)
-    _, upper_band, lower_band = calculate_bollinger_bands(all_prices, BB_PERIOD)
-    _, _, macd_hist_series = calculate_macd_series(all_prices, short_period=SHORT_EMA_PERIOD, long_period=LONG_EMA_PERIOD)
+    prev_rsi = calculate_rsi(all_prices[:-1], RSI_PERIOD)
+    middle_band, upper_band, lower_band = calculate_bollinger_bands(all_prices, BB_PERIOD)
+    _, _, macd_hist_series = calculate_macd_series(all_prices)
     short_atr = calculate_atr(all_prices, ATR_REGIME_SHORT)
     long_atr = calculate_atr(all_prices, ATR_REGIME_LONG)
-    long_ema_slope = calculate_ema_slope(long_ema_series, period=5)
+    trend_consistency = calculate_trend_consistency(all_prices, TREND_CONSISTENCY_PERIOD)
+    
+    bb_width = (upper_band - lower_band) / middle_band if middle_band and middle_band > 0 else 0 # **NEW INDICATOR**
 
-    if any(v is None for v in [rsi, upper_band, lower_band, short_atr, long_atr, long_ema_slope]) or macd_hist_series is None or len(macd_hist_series) < 2:
+    if any(v is None for v in [short_ema, long_ema, rsi, prev_rsi, upper_band, lower_band, short_atr, long_atr, trend_consistency, long_ema_slope]) or macd_hist_series is None or len(macd_hist_series) < 3:
         return "HOLD"
     
-    short_ema = short_ema_series[-1]
-    long_ema = long_ema_series[-1]
     macd_histogram = macd_hist_series[-1]
     prev_macd_histogram = macd_hist_series[-2]
 
-    # Regime Detection
-    is_high_volatility = short_atr > (long_atr * 1.5)
-    is_trending = abs(long_ema_slope) > 0.15 # Trend is significant if slope is steep
+    # Regime Detection (Refined)
+    is_high_volatility = short_atr > (long_atr * 1.65)
+    is_trending_market = trend_consistency < 1.15 and abs(long_ema_slope) > 0.1 # Trend must be smooth AND have direction
+    is_ranging_market = not is_trending_market and bb_width < 0.08 # Explicit ranging check
 
-    # --- 3. Signal Strength Scoring System ---
-    bullish_score = 0.0
-    bearish_score = 0.0
-
-    # Trend Signals (Primary driver)
-    if short_ema > long_ema:
-        bullish_score += 1.5
-    else:
-        bearish_score += 1.5
-    if long_ema_slope > 0.05: # Positive slope
-        bullish_score += 2.0 * min(long_ema_slope, 3.0) # Cap the contribution
-    elif long_ema_slope < -0.05: # Negative slope
-        bearish_score += 2.0 * min(abs(long_ema_slope), 3.0)
-
-    # Momentum Signals
-    if macd_histogram > 0:
-        bullish_score += 1.0
-    else:
-        bearish_score += 1.0
-    if macd_histogram > prev_macd_histogram: # Momentum increasing
-        bullish_score += 0.5
-    else: # Momentum decreasing
-        bearish_score += 0.5
-    
-    # Overbought/Oversold Signals (Mean Reversion)
-    rsi_overbought = 75 if is_high_volatility else 70
-    rsi_oversold = 25 if is_high_volatility else 30
-    
-    if rsi < rsi_oversold:
-        bullish_score += 1.5 # Potential reversal buy signal
-    if rsi > rsi_overbought:
-        bearish_score += 1.5 # Potential reversal sell signal
-
-    if current_price < lower_band:
-        bullish_score += 1.0 # Mean reversion signal
-    if current_price > upper_band:
-        bearish_score += 1.0 # Mean reversion signal
-
-    # Sentiment Overlay
-    if net_sentiment_score > 0:
-        bullish_score += net_sentiment_score
-    else:
-        bearish_score += abs(net_sentiment_score)
-
-    # --- 4. Decision Logic based on Scores & Regime ---
-    BUY_THRESHOLD = 5.0
-    SELL_THRESHOLD = 5.0
-    
-    if is_trending:
-        # In a trend, prioritize trend-following signals and ignore mean-reversion signals
-        if long_ema_slope > 0: # Bullish trend
-            if bullish_score > BUY_THRESHOLD and bearish_score < 3.0:
-                return "BUY"
-            # In a strong uptrend, take profits if momentum wanes and sentiment turns
-            if bearish_score > SELL_THRESHOLD and bullish_score < 3.0:
-                return "SELL"
-        elif long_ema_slope < 0: # Bearish trend
-            if bearish_score > SELL_THRESHOLD and bullish_score < 3.0:
-                return "SELL"
-            # In a strong downtrend, consider buying only on extreme oversold + positive sentiment
-            if bullish_score > BUY_THRESHOLD and bearish_score < 3.0 and net_sentiment_score > 1.5:
-                 return "BUY"
-    else: # Ranging / Choppy Market
-        # In a ranging market, prioritize mean-reversion signals
-        # Buy condition: Oversold signals + positive sentiment + weakening bearish momentum
-        if (rsi < rsi_oversold or current_price < lower_band) and bullish_score > BUY_THRESHOLD and bearish_score < 3.5:
+    # --- 3. Multi-Regime Decision Logic ---
+    if is_high_volatility:
+        # === CRISIS MODE: High-conviction, sentiment-driven trend-following ===
+        if net_sentiment_score >= 3.5 and short_ema > long_ema and macd_histogram > 0 and rsi < 75:
             return "BUY"
-        # Sell condition: Overbought signals + negative sentiment + weakening bullish momentum
-        if (rsi > rsi_overbought or current_price > upper_band) and bearish_score > SELL_THRESHOLD and bullish_score < 3.5:
+        elif net_sentiment_score <= -3.5 and short_ema < long_ema and macd_histogram < 0 and rsi > 25:
             return "SELL"
+    else:
+        # === NORMAL MODE: Adaptive with Enhanced Confirmation Logic ===
+        if is_trending_market:
+            # Sub-Regime: Confirmed Trending Market
+            bullish_trend = short_ema > long_ema and long_ema_slope > 0.15 # Stricter slope for entry
+            bearish_trend = short_ema < long_ema and long_ema_slope < -0.15 # Stricter slope for entry
+            
+            # Profit-taking / Reversal signal
+            is_momentum_fading_up = macd_histogram > 0 and macd_histogram < prev_macd_histogram
+            if (rsi > 78 or current_price > upper_band) and is_momentum_fading_up:
+                return "SELL"
+
+            # **IMPROVEMENT**: Entry requires strong slope confirmation
+            if bullish_trend and macd_histogram > 0 and rsi < 75 and net_sentiment_score > -2.0:
+                return "BUY"
+            
+            if bearish_trend and macd_histogram < 0 and rsi > 25 and net_sentiment_score < 2.0:
+                return "SELL"
+        
+        elif is_ranging_market:
+            # Sub-Regime: Confirmed Ranging Market (Mean-Reversion Logic)
+            
+            # **IMPROVEMENT**: Stricter entry criteria to avoid whipsaws.
+            is_reversing_up = macd_histogram > prev_macd_histogram and prev_macd_histogram < 0
+            if rsi < 32 and current_price < lower_band and is_reversing_up and net_sentiment_score > -3.0:
+                return "BUY"
+                
+            is_reversing_down = macd_histogram < prev_macd_histogram and prev_macd_histogram > 0
+            if rsi > 68 and current_price > upper_band and is_reversing_down and net_sentiment_score < 3.0:
+                return "SELL"
 
     return "HOLD"
