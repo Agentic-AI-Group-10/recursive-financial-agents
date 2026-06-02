@@ -126,27 +126,28 @@ def decide(current_price, price_history, news_context):
 
     all_prices = price_history + [current_price]
 
-    SMA_TREND_LONG = max(100, len(all_prices) // 2)
-    SMA_TREND_MEDIUM = max(50, len(all_prices) // 4)
-    RSI_PERIOD = 14
-    ATR_SHORT = 10
-    ATR_LONG = 50
-    ROC_CRASH_PERIOD = 20
-    STOP_LOSS_LOOKBACK = 30 
+    # Dynamic scaling of indicators based on price history length
+    sma_trend_long = max(100, len(all_prices) // 2)
+    sma_trend_medium = max(50, len(all_prices) // 4)
+    rsi_period = 14
+    atr_short = 10
+    atr_long = 50
+    roc_crash_period = 20
+    stop_loss_lookback = 30 
 
-    required_history_length = max(SMA_TREND_LONG + 1, ATR_LONG + 1, ROC_CRASH_PERIOD + 1, RSI_PERIOD + 1, 
-                                  26 + 9 + 1, STOP_LOSS_LOOKBACK + 1) 
+    required_history_length = max(sma_trend_long + 1, atr_long + 1, roc_crash_period + 1, rsi_period + 1, 
+                                  26 + 9 + 1, stop_loss_lookback + 1) 
     if len(all_prices) < required_history_length:
         return "HOLD"
 
-    sma_100 = calculate_sma(all_prices, SMA_TREND_LONG)
-    sma_50 = calculate_sma(all_prices, SMA_TREND_MEDIUM)
-    rsi = calculate_rsi(all_prices, RSI_PERIOD)
+    sma_100 = calculate_sma(all_prices, sma_trend_long)
+    sma_50 = calculate_sma(all_prices, sma_trend_medium)
+    rsi = calculate_rsi(all_prices, rsi_period)
     macd_line, signal_line, macd_hist_series = calculate_macd_series(all_prices)
-    short_atr = calculate_atr(all_prices, ATR_SHORT)
-    long_atr = calculate_atr(all_prices, ATR_LONG)
-    roc_20 = calculate_roc(all_prices, ROC_CRASH_PERIOD)
-    donchian_high_30 = np.max(all_prices[-STOP_LOSS_LOOKBACK:]) if len(all_prices) >= STOP_LOSS_LOOKBACK else None
+    short_atr = calculate_atr(all_prices, atr_short)
+    long_atr = calculate_atr(all_prices, atr_long)
+    roc_20 = calculate_roc(all_prices, roc_crash_period)
+    donchian_high_30 = np.max(all_prices[-stop_loss_lookback:]) if len(all_prices) >= stop_loss_lookback else None
 
     if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_30]) or \
        macd_hist_series is None or len(macd_hist_series) < 2:
