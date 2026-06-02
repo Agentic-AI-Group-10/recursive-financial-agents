@@ -142,7 +142,7 @@ def calculate_sentiment_score(news_context):
         "policy clarity": 2.5, "market stability": 2.6, "economic resilience": 2.7,
         "bullish momentum": 2.5, "bearish momentum": -2.5, "market breadth contraction": -1.8
     }
-    negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent", "unlikely", "avoid", "no signs of", "unlikely to", "lack", "absence", "never", "none", "neglect", "without", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "never again", "no longer", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "without any", "lack any", "fail any", "struggle any", "prevent any", "avoid any", "unlikely any", "neglect any", "no longer any", "lack of any", "fail of any", "struggle of any", "prevent of any", "avoid of any", "unlikely of any", "neglect of any"]
+    negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent", "unlikely", "avoid", "no signs of", "unlikely to", "lack", "absence", "never", "none", "neglect", "without", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "never again", "no longer", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "without any", "lack any", "fail any", "struggle any", "prevent any", "avoid any", "unlikely any", "neglect any", "no longer any", "lack of any", "fail of any", "struggle of any", "prevent of any", "avoid of any", "unlikely of any", "neglect of any", "doesn't", "doesn't show", "doesn't indicate", "doesn't suggest", "isn't showing", "isn't indicating", "isn't suggesting", "lacks", "fails to", "struggles to", "avoids", "prevents", "unlikely to", "avoiding", "lacking", "failing to", "struggling to", "preventing", "avoiding", "unlikely showing", "lacking any", "failing any", "struggling any", "preventing any", "avoiding any", "unlikely any"]
     net_sentiment_score = 0.0
     for keyword, weight in sentiment_keywords.items():
         pattern = r'(?<!\S)(?i)' + re.escape(keyword) + r'(?!\S)'
@@ -153,7 +153,7 @@ def calculate_sentiment_score(news_context):
             if any(neg_word in post_context for neg_word in negation_words):
                 is_negated = not is_negated
             if is_negated:
-                weight *= 0.2
+                weight *= 0.1
             net_sentiment_score += -weight if is_negated else weight
     return net_sentiment_score
 
@@ -189,7 +189,8 @@ def decide(current_price, price_history, news_context):
     ema_26 = calculate_ema_series(all_prices, ema_long)[-1] if price_len >= ema_long else None
     ema_9 = calculate_ema_series(all_prices, ema_signal)[-1] if price_len >= ema_signal else None
     
-    rsi = calculate_rsi(all_prices, 14)
+    rsi_period = 14 if volatility_ratio < 1.75 else 7
+    rsi = calculate_rsi(all_prices, rsi_period)
     macd_line, signal_line, macd_hist_series = calculate_macd_series(all_prices)
     short_atr = calculate_atr(all_prices, 20)
     long_atr = calculate_atr(all_prices, 50)
