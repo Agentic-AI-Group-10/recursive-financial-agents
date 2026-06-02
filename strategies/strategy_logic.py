@@ -97,6 +97,24 @@ def calculate_roc(prices, period=20):
         return 0.0
     return ((prices[-1] - prices[-1 - period]) / prices[-1 - period]) * 100
 
+def calculate_bollinger_bands(prices, period=20, std_dev=2):
+    """Calculates Bollinger Bands."""
+    if len(prices) < period:
+        return None, None
+    sma = calculate_sma(prices, period)
+    std = np.std(prices[-period:])
+    upper_band = sma + std_dev * std
+    lower_band = sma - std_dev * std
+    return upper_band, lower_band
+
+def calculate_stochastic_oscillator(prices, period=14):
+    """Calculates the Stochastic Oscillator."""
+    if len(prices) < period:
+        return None
+    lowest_low = np.min(prices[-period:])
+    highest_high = np.max(prices[-period:])
+    return ((prices[-1] - lowest_low) / (highest_high - lowest_low)) * 100
+
 def decide(current_price, price_history, news_context):
     context_lower = news_context.lower()
     sentiment_keywords = {
@@ -134,9 +152,11 @@ def decide(current_price, price_history, news_context):
     atr_long = 50
     roc_crash_period = 20
     stop_loss_lookback = 30 
+    bollinger_bands_period = 20
+    stochastic_oscillator_period = 14
 
     required_history_length = max(sma_trend_long + 1, atr_long + 1, roc_crash_period + 1, rsi_period + 1, 
-                                  26 + 9 + 1, stop_loss_lookback + 1) 
+                                  26 + 9 + 1, stop_loss_lookback + 1, bollinger_bands_period + 1, stochastic_oscillator_period + 1) 
     if len(all_prices) < required_history_length:
         return "HOLD"
 
@@ -148,8 +168,10 @@ def decide(current_price, price_history, news_context):
     long_atr = calculate_atr(all_prices, atr_long)
     roc_20 = calculate_roc(all_prices, roc_crash_period)
     donchian_high_30 = np.max(all_prices[-stop_loss_lookback:]) if len(all_prices) >= stop_loss_lookback else None
+    upper_band, lower_band = calculate_bollinger_bands(all_prices, bollinger_bands_period)
+    stochastic_oscillator = calculate_stochastic_oscillator(all_prices, stochastic_oscillator_period)
 
-    if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_30]) or \
+    if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_30, upper_band, lower_band, stochastic_oscillator]) or \
        macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
 
@@ -209,8 +231,10 @@ def decide(current_price, price_history, news_context):
     is_not_overbought = rsi < 78
     is_sentiment_permissive_for_buy = net_sentiment_score > -3.0
     is_sufficient_volatility = short_atr > (long_atr * 0.6) 
+    is_bollinger_band_breakout = current_price > upper_band
+    is_stochastic_oscillator_buy = stochastic_oscillator < 20
 
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility:
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_bollinger_band_breakout and is_stochastic_oscillator_buy:
         return "BUY"
 
     return "HOLD"
