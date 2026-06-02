@@ -144,28 +144,6 @@ def calculate_sentiment_score(news_context):
             net_sentiment_score += -weight if is_negated else weight
     return net_sentiment_score
 
-def calculate_ichimoku_cloud(prices, conversion_line_period=9, base_line_period=26, leading_span_b_period=52):
-    if len(prices) < max(conversion_line_period, base_line_period, leading_span_b_period):
-        return None, None, None, None, None
-    high = np.array(prices)
-    low = np.array(prices)
-    conversion_high = np.max(high[-conversion_line_period:])
-    conversion_low = np.min(low[-conversion_line_period:])
-    conversion_line = (conversion_high + conversion_low) / 2
-    
-    base_high = np.max(high[-base_line_period:])
-    base_low = np.min(low[-base_line_period:])
-    base_line = (base_high + base_low) / 2
-    
-    leading_span_a = (conversion_line + base_line) / 2
-    leading_span_b_high = np.max(high[-leading_span_b_period:])
-    leading_span_b_low = np.min(low[-leading_span_b_period:])
-    leading_span_b = (leading_span_b_high + leading_span_b_low) / 2
-    
-    lagging_line = prices[-1]
-    
-    return conversion_line, base_line, leading_span_a, leading_span_b, lagging_line
-
 def decide(current_price, price_history, news_context):
     context_lower = news_context.lower()
     sentiment_score = calculate_sentiment_score(news_context)
@@ -195,12 +173,9 @@ def decide(current_price, price_history, news_context):
     stochastic_oscillator = calculate_stochastic_oscillator(all_prices)
     keltner_upper_band, keltner_lower_band = calculate_keltner_channel(all_prices)
     bollinger_upper, bollinger_lower, bollinger_sma = calculate_bollinger_bands(all_prices)
-    
-    ichimoku_conversion, ichimoku_base, ichimoku_a, ichimoku_b, ichimoku_lagging = calculate_ichimoku_cloud(all_prices)
-    cloud_color = "BULLISH" if ichimoku_a > ichimoku_b else "BEARISH"
 
     if any(v is None for v in [sma_50, ema_12, ema_26, ema_9, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, stochastic_oscillator]) or \
-       macd_hist_series is None or len(macd_hist_series) < 2 or bollinger_upper is None or ichimoku_a is None:
+       macd_hist_series is None or len(macd_hist_series) < 2 or bollinger_upper is None:
         return "HOLD"
 
     macd_histogram = macd_hist_series[-1]
@@ -218,7 +193,7 @@ def decide(current_price, price_history, news_context):
     is_extreme_crash_velocity = roc_20 < -18.0
     is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold and current_price < donchian_low_30 and (short_atr > long_atr * 1.2) and current_price < keltner_lower_band
 
-    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 15 and ema_12 > ema_26 and sentiment_score > -1.5 and cloud_color == "BULLISH":
+    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 15 and ema_12 > ema_26 and sentiment_score > -1.5:
         return "BUY"
 
     if is_crisis_regime:
@@ -243,13 +218,13 @@ def decide(current_price, price_history, news_context):
     is_primary_downtrend = current_price < sma_50
     is_momentum_confirming_down = macd_histogram < 0 and prev_macd_histogram >= 0
     is_sentiment_permissive_for_sell = sentiment_score < 2.0
-    if is_primary_downtrend and is_momentum_confirming_down and is_sentiment_permissive_for_sell and cloud_color == "BEARISH":
+    if is_primary_downtrend and is_momentum_confirming_down and is_sentiment_permissive_for_sell:
         return "SELL"
 
     is_momentum_fading = macd_hist_delta < 0
     overbought_threshold = 85 if is_high_volatility else 82
     is_extremely_overbought = rsi > overbought_threshold
-    if is_extremely_overbought and is_momentum_fading and cloud_color == "BEARISH":
+    if is_extremely_overbought and is_momentum_fading:
         return "SELL"
 
     is_primary_uptrend = current_price > sma_50 and (sma_200 is None or current_price > sma_200)
@@ -261,7 +236,7 @@ def decide(current_price, price_history, news_context):
     is_ema_crossover = ema_12 is not None and ema_26 is not None and ema_12 > ema_26
     is_bollinger_in_range = current_price > bollinger_lower and current_price < bollinger_upper
 
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_keltner_channel and is_bollinger_in_range and stochastic_oscillator > 30 and is_ema_crossover and cloud_color == "BULLISH":
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_keltner_channel and is_bollinger_in_range and stochastic_oscillator > 30 and is_ema_crossover:
         return "BUY"
 
     return "HOLD"
