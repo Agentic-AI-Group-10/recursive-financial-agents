@@ -77,15 +77,6 @@ def calculate_donchian_channel(prices, period=20):
     lower_band = donchian_low
     return upper_band, lower_band
 
-def calculate_bollinger_bands(prices, period=20, std_dev=2):
-    if len(prices) < period:
-        return None, None
-    sma = np.mean(prices[-period:])
-    std = np.std(prices[-period:])
-    upper_band = sma + std_dev * std
-    lower_band = sma - std_dev * std
-    return upper_band, lower_band
-
 def calculate_stochastic_oscillator(prices, period=14):
     if len(prices) < period:
         return None
@@ -125,13 +116,16 @@ def calculate_sentiment_score(news_context):
         "inflation concerns": -1.0, "deflation risk": -2.0, "market breadth": 1.0,
         "geopolitical stability": 2.0, "market resilience": 2.0
     }
-    negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent", "unlikely", "avoid", "no signs of", "unlikely to", "lack", "absence", "never", "none", "neglect"]
+    negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent", "unlikely", "avoid", "no signs of", "unlikely to", "lack", "absence", "never", "none", "neglect", "without", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect"]
     net_sentiment_score = 0.0
     for keyword, weight in sentiment_keywords.items():
         pattern = r'(?<!\S)' + re.escape(keyword) + r'(?!\S)'
         for match in re.finditer(pattern, context_lower):
             pre_context = context_lower[max(0, match.start() - 100):match.start()]
+            post_context = context_lower[match.end():match.end() + 100]
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
+            if any(neg_word in post_context for neg_word in negation_words):
+                is_negated = not is_negated
             net_sentiment_score += -weight if is_negated else weight
     return net_sentiment_score
 
@@ -154,11 +148,10 @@ def decide(current_price, price_history, news_context):
     long_atr = calculate_atr(all_prices, 50)
     roc_20 = calculate_roc(all_prices, 20)
     donchian_high_30, donchian_low_30 = calculate_donchian_channel(all_prices, 30)
-    upper_band, lower_band = calculate_bollinger_bands(all_prices)
     stochastic_oscillator = calculate_stochastic_oscillator(all_prices)
     keltner_upper_band, keltner_lower_band = calculate_keltner_channel(all_prices)
 
-    if any(v is None for v in [sma_50, sma_200, ema_12, ema_26, ema_9, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, upper_band, lower_band, stochastic_oscillator]) or \
+    if any(v is None for v in [sma_50, sma_200, ema_12, ema_26, ema_9, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, stochastic_oscillator]) or \
        macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
 
@@ -215,11 +208,10 @@ def decide(current_price, price_history, news_context):
     is_not_overbought = rsi < (78 if not is_high_volatility else 80)
     is_sentiment_permissive_for_buy = sentiment_score > -3.0
     is_sufficient_volatility = short_atr > (long_atr * 0.6)
-    is_price_in_bollinger_band = current_price > lower_band and current_price < upper_band
     is_price_in_keltner_channel = current_price > keltner_lower_band and current_price < keltner_upper_band
     is_ema_crossover = ema_12 is not None and ema_26 is not None and ema_12 > ema_26
 
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_bollinger_band and is_price_in_keltner_channel and stochastic_oscillator > 25 and is_ema_crossover:
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_keltner_channel and stochastic_oscillator > 25 and is_ema_crossover:
         return "BUY"
 
     return "HOLD"
