@@ -11,8 +11,10 @@ def calculate_ema_series(data, period):
     data_arr = np.array(data, dtype=float)
     try:
         import pandas as pd
+        # Using pandas is preferred for accuracy and standard implementation
         return pd.Series(data_arr).ewm(span=period, adjust=False).mean().to_numpy()[period-1:]
     except ImportError:
+        # Fallback pure-python EMA calculation
         ema_values = np.zeros(len(data_arr) - period + 1, dtype=float)
         ema_values[0] = np.mean(data_arr[:period])
         multiplier = 2 / (period + 1)
@@ -75,39 +77,47 @@ def calculate_roc(prices, period=20):
         return None
     return ((prices[-1] - prices[-1 - period]) / prices[-1 - period]) * 100
 
+def calculate_bollinger_bands(prices, period=20, num_std_dev=2):
+    """Calculates the Bollinger Bands for the latest price."""
+    if len(prices) < period:
+        return None, None, None
+    sma = np.mean(prices[-period:])
+    std_dev = np.std(prices[-period:])
+    upper_band = sma + (std_dev * num_std_dev)
+    lower_band = sma - (std_dev * num_std_dev)
+    return sma, upper_band, lower_band
+
 def decide(current_price, price_history, news_context):
     """
     SELF-IMPROVED STRATEGY V3:
-    This version enhances V2's successful regime-based model with superior risk
-    management and signal filtering.
-    1.  Adaptive Volatility Stop-Loss: Replaces the fixed percentage stop with a
-        dynamic ATR-based trail (3x ATR from 20-day high), adapting risk levels
-        to current market volatility.
-    2.  Choppy Market Filter: A new regime is introduced to detect sideways,
-        trendless markets by analyzing moving average convergence and ATR ratios.
-        This prevents trades in low-conviction environments, reducing whipsaws.
-    3.  Robust Pullback Entry: The buy signal is upgraded from a simple MACD
-        crossover to a "pullback" entry. It requires a confirmed strong uptrend
-        (Price > SMA50 > SMA100) and buys on dips when momentum re-accelerates.
-    4.  Sentiment Veto: A high-magnitude negative sentiment score now acts as an
-        emergency override, forcing a SELL to protect against catastrophic news.
+    This version evolves the successful parent strategy with three key enhancements:
+    1.  Adaptive ATR Trailing Stop: Replaces the fixed percentage stop-loss with a
+        dynamic stop based on a multiple of the Average True Range (ATR). This
+        adapts risk management to current market volatility, tightening in quiet
+        markets and loosening in volatile ones.
+    2.  Volatility-Weighted Sentiment: The impact of the news sentiment score is now
+        amplified during periods of high volatility. This makes the strategy more
+        responsive to narratives during market stress or euphoria.
+    3.  Consolidation Breakout Signal: A new buy signal using Bollinger Bands has
+        been added to identify and enter trades when price breaks out of a
+        low-volatility consolidation, capturing potential new trends earlier.
     """
     # --- 1. Sentiment Analysis ---
     context_lower = news_context.lower()
     sentiment_keywords = {
         "fed pivot": 3.0, "rate cut": 2.5, "quantitative easing": 2.5, "soft landing": 2.5,
-        "cooling inflation": 2.5, "cpi miss": 2.5, "disinflation": 2.5, "ai boom": 2.5,
-        "stimulus": 2.0, "dovish": 2.0, "record high": 2.0, "bullish": 2.0,
-        "strong earnings": 2.0, "beat estimates": 1.5, "recovery": 1.5, "upgrade": 1.5,
+        "cooling inflation": 2.5, "cpi miss": 2.5, "ai boom": 2.5, "stimulus": 2.0,
+        "dovish": 2.0, "record high": 2.0, "bullish": 2.0, "strong earnings": 2.0,
+        "beat estimates": 1.5, "recovery": 1.5, "upgrade": 1.5, "de-escalation": 2.0,
         "short squeeze": 3.5, "capitulation": 3.0, "panic selling": 2.5, "extreme fear": 2.0,
         "strong jobs report": 0.5,
         "recession": -3.0, "crisis": -3.0, "stagflation": -3.0, "hot inflation": -3.0,
         "war": -3.0, "yield curve inversion": -3.5, "quantitative tightening": -2.5,
-        "black swan": -4.5, "systemic risk": -4.5, "contagion": -3.5, "credit crunch": -3.5,
-        "credit downgrade": -4.0, "debt ceiling": -2.5, "rate hike": -2.5, "bankruptcy": -2.5,
-        "hard landing": -2.5, "geopolitical risk": -2.5, "cpi beat": -2.5, "vix spike": -2.5,
-        "hawkish": -2.0, "bearish": -2.0, "sell-off": -2.0, "weak earnings": -2.0,
-        "market turmoil": -2.0, "bubble": -2.0, "uncertainty": -1.5,
+        "black swan": -4.0, "systemic risk": -4.0, "contagion": -3.5, "credit crunch": -3.5,
+        "rate hike": -2.5, "bankruptcy": -2.5, "hard landing": -2.5, "geopolitical risk": -2.5,
+        "cpi beat": -2.5, "vix spike": -2.5, "hawkish": -2.0, "bearish": -2.0,
+        "sell-off": -2.0, "weak earnings": -2.0, "market turmoil": -2.0, "bubble": -2.0,
+        "uncertainty": -1.5,
         "euphoria": -2.5, "mania": -3.0, "irrational exuberance": -3.0, "extreme greed": -2.5,
     }
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent"]
@@ -126,10 +136,12 @@ def decide(current_price, price_history, news_context):
     SMA_TREND_LONG = 100
     SMA_TREND_MEDIUM = 50
     RSI_PERIOD = 14
-    ATR_SHORT = 14
+    ATR_SHORT = 10
     ATR_LONG = 50
     ROC_CRASH_PERIOD = 20
     STOP_LOSS_LOOKBACK = 20
+    BB_PERIOD = 20
+    ATR_STOP_MULTIPLIER = 2.5
 
     required_history_length = max(SMA_TREND_LONG + 1, ATR_LONG + 1, ROC_CRASH_PERIOD + 1, 50)
     if len(all_prices) < required_history_length:
@@ -144,82 +156,78 @@ def decide(current_price, price_history, news_context):
     long_atr = calculate_atr(all_prices, ATR_LONG)
     roc_20 = calculate_roc(all_prices, ROC_CRASH_PERIOD)
     donchian_high_20 = np.max(all_prices[-STOP_LOSS_LOOKBACK:]) if len(all_prices) >= STOP_LOSS_LOOKBACK else None
+    _, upper_bb, _ = calculate_bollinger_bands(all_prices, BB_PERIOD)
 
     # Null check for all indicators
-    if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_20]) or macd_hist_series is None or len(macd_hist_series) < 2:
+    if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_20, upper_bb]) or macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
 
     macd_histogram = macd_hist_series[-1]
     prev_macd_histogram = macd_hist_series[-2]
     macd_hist_delta = macd_histogram - prev_macd_histogram
 
-    # --- 3. Regime Detection ---
-    # Crisis Regime: High-risk environment
+    # --- 3. Regime and State Detection ---
+    volatility_ratio = short_atr / long_atr if long_atr > 0 else 1.0
+    sentiment_amplifier = 1.0 + min(max(volatility_ratio - 1.0, 0.0), 1.5)
+    amplified_sentiment = net_sentiment_score * sentiment_amplifier
+
+    # Crisis Regime: General high-risk environment
     is_long_term_downtrend = current_price < sma_100
-    is_high_volatility = short_atr > (long_atr * 1.75)
+    is_high_volatility = volatility_ratio > 1.75
     is_crash_velocity = roc_20 < -15.0
     is_crisis_regime = (is_long_term_downtrend and is_high_volatility) or is_crash_velocity
 
-    # Capitulation Regime: Extreme subset of crisis, potential bottom
+    # Capitulation Regime: An extreme subset of crisis, signaling a potential bottom
     is_deeply_oversold = rsi < 25
     is_extreme_crash_velocity = roc_20 < -18.0
     is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold
 
-    # Choppy Market Regime: Sideways, trendless market
-    is_trend_flat = abs(sma_50 - sma_100) < short_atr
-    is_vol_stable = (short_atr / long_atr) < 1.4
-    is_choppy_market = is_trend_flat and is_vol_stable
-
     # --- 4. Decision Logic (Hierarchical) ---
 
-    # REGIME 0: SENTIMENT VETO (HIGHEST PRIORITY)
-    # Catastrophic news overrides all technicals.
-    if net_sentiment_score <= -6.0:
-        return "SELL"
-
-    # REGIME 1: CONTRARIAN CAPITULATION
-    # Buy extreme fear, but only when momentum shows signs of turning.
+    # REGIME 1: CONTRARIAN CAPITULATION (HIGHEST PRIORITY)
     if is_capitulation_candidate and macd_hist_delta > 0:
         return "BUY"
 
     # REGIME 2: CRISIS AVERSION
-    # If in a general crisis (but not a specific capitulation buy signal), be defensive.
     if is_crisis_regime:
         if macd_histogram < 0 or current_price < sma_50:
             return "SELL"
-        return "HOLD" # Hold cash and wait for the storm to pass.
-
-    # REGIME 3: CHOPPY MARKET FILTER
-    # Avoid trading in directionless, noisy markets to prevent whipsaws.
-    if is_choppy_market:
         return "HOLD"
 
-    # REGIME 4: NORMAL MARKET CONDITIONS
+    # REGIME 3: NORMAL MARKET CONDITIONS
 
     # --- SELL LOGIC (Risk Management First) ---
-    # Priority 1: Adaptive Volatility Stop-Loss. Exit if price drops 3x ATR from 20-day high.
-    if current_price < (donchian_high_20 - (3 * short_atr)):
+    # Priority 1: Adaptive ATR Trailing Stop-Loss.
+    if current_price < (donchian_high_20 - (ATR_STOP_MULTIPLIER * short_atr)):
         return "SELL"
 
     # Priority 2: Standard trend breakdown signal.
     is_primary_downtrend = current_price < sma_50
     is_momentum_confirming_down = macd_histogram < 0 and prev_macd_histogram >= 0
-    if is_primary_downtrend and is_momentum_confirming_down:
+    is_sentiment_permissive_for_sell = amplified_sentiment < 3.0
+    if is_primary_downtrend and is_momentum_confirming_down and is_sentiment_permissive_for_sell:
         return "SELL"
 
     # Priority 3: Profit-taking on overbought conditions with FADING momentum.
     is_momentum_fading = macd_hist_delta < 0
-    is_extremely_overbought = rsi > 80
-    if is_extremely_overbought and is_momentum_fading:
+    is_overbought = rsi > 78
+    if is_overbought and is_momentum_fading:
         return "SELL"
 
-    # --- BUY LOGIC (Robust Pullback Entry) ---
-    is_strong_uptrend = current_price > sma_50 and sma_50 > sma_100
-    is_not_overextended = rsi < 75
-    is_momentum_accelerating = macd_hist_delta > 0
-    is_sentiment_permissive = net_sentiment_score > -3.0
+    # --- BUY LOGIC ---
+    is_primary_uptrend = current_price > sma_50
+    is_not_overbought = rsi < 75
+    is_sentiment_permissive_for_buy = amplified_sentiment > -3.0
 
-    if is_strong_uptrend and is_not_overextended and is_momentum_accelerating and is_sentiment_permissive:
+    # BUY Condition 1: Standard Momentum Entry (MACD Crossover)
+    is_momentum_confirming_up = macd_histogram > 0 and prev_macd_histogram <= 0
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy:
+        return "BUY"
+
+    # BUY Condition 2: Volatility Breakout Entry (Bollinger Band Break)
+    is_volatility_expanding = volatility_ratio > 1.25
+    is_breaking_upper_band = current_price > upper_bb
+    if is_primary_uptrend and is_breaking_upper_band and is_volatility_expanding and is_not_overbought and is_sentiment_permissive_for_buy:
         return "BUY"
 
     # Default action is to hold the current position.
