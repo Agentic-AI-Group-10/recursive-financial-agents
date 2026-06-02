@@ -104,25 +104,20 @@ def calculate_roc(prices, period=20):
 def decide(current_price, price_history, news_context):
     """
     SELF-IMPROVED STRATEGY V4:
-    This version refines the strategy based on lessons from stress regimes,
-    aiming to improve recovery capture and adaptive risk management:
-    1.  Enhanced Capitulation Buy: The contrarian "buy the dip" logic now
-        requires an immediate short-term bounce confirmation (today's price
-        higher than yesterday's close) in addition to extreme technicals
-        (ROC decline, low RSI, positive MACD histogram delta). This aims to
-        reduce false early entries during capitulation.
-    2.  Crisis Recovery Buy: Introduced a new buy signal specifically for
-        the recovery phase of a crisis. This allows re-entry when the market
-        starts to stabilize and show signs of a V-shaped recovery (price above
-        medium-term SMA, RSI bouncing from oversold, positive MACD histogram).
-    3.  Adaptive Stop-Loss: Replaced the fixed percentage dynamic stop-loss
-        with an ATR-based trailing stop, calculated from the 20-day high.
-        This stop-loss is more adaptive to market volatility, providing more
-        room during high volatility and tightening during low volatility,
-        reducing premature stop-outs.
-    4.  Maintains Robust Normal Regime Logic: The core trend-following and
+    This version refines the strategy based on lessons from stress regimes:
+    1.  Adaptive Dynamic Stop-Loss: The stop-loss percentage is now dynamic,
+        widening from 8% to 10% during periods of high volatility (indicated by ATR).
+        This provides more room for price fluctuations in turbulent markets, reducing
+        premature stop-outs while maintaining disciplined risk management.
+    2.  Nuanced Crisis Aversion: The "Crisis Aversion" logic is enhanced. While still
+        defensive, it now allows the strategy to HOLD (instead of automatically SELL)
+        if in a crisis regime but showing early signs of recovery (positive MACD
+        histogram delta and RSI bouncing from extreme lows). This aims to prevent
+        premature exits during potential V-shaped recoveries.
+    3.  Maintains Robust Normal Regime Logic: The core trend-following and
         momentum-based buy/sell signals, along with profit-taking in overbought
-        conditions, remain effective for stable market environments.
+        conditions, remain effective for stable market environments. The capitulation
+        buy logic also remains independent of sentiment.
     """
     # --- 1. Sentiment Analysis ---
     context_lower = news_context.lower()
@@ -162,7 +157,6 @@ def decide(current_price, price_history, news_context):
     ATR_LONG = 50
     ROC_CRASH_PERIOD = 20
     STOP_LOSS_LOOKBACK = 20
-    ATR_STOP_MULTIPLIER = 3.5 # New: Multiplier for ATR-based stop-loss
 
     # Ensure enough history for all indicators
     required_history_length = max(SMA_TREND_LONG + 1, ATR_LONG + 1, ROC_CRASH_PERIOD + 1, RSI_PERIOD + 1, 
@@ -191,7 +185,7 @@ def decide(current_price, price_history, news_context):
     # --- 3. Regime Detection ---
     # Crisis Regime: General high-risk environment
     is_long_term_downtrend = current_price < sma_100
-    is_high_volatility = short_atr > (long_atr * 1.75)
+    is_high_volatility = short_atr > (long_atr * 1.75) # Volatility threshold for adaptive stop-loss
     is_crash_velocity = roc_20 < -15.0
     is_crisis_regime = (is_long_term_downtrend and is_high_volatility) or is_crash_velocity
 
@@ -203,36 +197,35 @@ def decide(current_price, price_history, news_context):
     # --- 4. Decision Logic (Hierarchical) ---
 
     # REGIME 1: CONTRARIAN CAPITULATION (HIGHEST PRIORITY)
-    # Buy when there is blood in the streets, but only if momentum shows signs of turning AND a short-term bounce.
-    if is_capitulation_candidate and macd_hist_delta > 0 and current_price > all_prices[-2]:
+    # Buy when there is blood in the streets, but only if momentum shows signs of turning.
+    # Removed sentiment filter here to allow buys during extreme negative sentiment.
+    if is_capitulation_candidate and macd_hist_delta > 0:
         return "BUY"
 
-    # REGIME 2: CRISIS AVERSION & RECOVERY
-    # If in a general crisis (but not a specific capitulation buy signal), be defensive or look for recovery.
+    # REGIME 2: CRISIS AVERSION (MODIFIED)
+    # If in a general crisis (but not a specific capitulation buy signal), be defensive.
     if is_crisis_regime:
-        # If momentum is negative or price is below medium-term trend, sell.
+        # NEW: If there are signs of short-term recovery within the crisis, HOLD instead of SELL.
+        is_recovering_from_oversold = rsi > 30 and macd_hist_delta > 0
+        if is_recovering_from_oversold:
+            return "HOLD" # Don't sell prematurely during a potential V-shaped recovery.
+        
+        # Otherwise, if no recovery signs, remain defensive.
         if macd_histogram < 0 or current_price < sma_50:
             return "SELL"
-        
-        # Crisis Recovery Buy: Look for re-entry during a V-shaped recovery
-        # Conditions: Price recovering above medium-term trend, RSI bouncing from oversold, positive MACD momentum.
-        is_crisis_recovery_buy = (
-            current_price > sma_50 and
-            rsi > 30 and rsi < 55 and # Bouncing from oversold but not yet overbought
-            macd_histogram > 0
-        )
-        if is_crisis_recovery_buy:
-            return "BUY"
-
-        return "HOLD" # Hold cash and wait for the storm to pass, or hold existing position if conditions are not explicitly bearish or bullish for recovery.
+        return "HOLD" # Hold cash and wait for the storm to pass, or hold existing position if conditions are not explicitly bearish.
 
     # REGIME 3: NORMAL MARKET CONDITIONS
 
     # --- SELL LOGIC (Risk Management First) ---
-    # Priority 1: Adaptive ATR-based Trailing Stop-Loss.
-    # Calculate stop-loss based on the 20-day high minus a multiple of ATR.
-    atr_trailing_stop = donchian_high_20 - (ATR_STOP_MULTIPLIER * short_atr)
-    if current_price < atr_trailing_stop:
+    # Priority 1: Dynamic Stop-Loss. Adjusted based on volatility.
+    base_stop_loss_factor = 0.92 # 8% drop
+    if is_high_volatility:
+        stop_loss_factor = 0.90 # 10% drop during high volatility
+    else:
+        stop_loss_factor = base_stop_loss_factor
+
+    if current_price < (donchian_high_20 * stop_loss_factor):
         return "SELL"
 
     # Priority 2: Standard trend breakdown signal.
