@@ -163,9 +163,10 @@ def decide(current_price, price_history, news_context):
     sma_50 = np.mean(all_prices[-50:])
     sma_200 = np.mean(all_prices[-200:]) if price_len >= 200 else None
     
-    ema_short = 12 if price_len >= 30 else 8
-    ema_long = 26 if price_len >= 30 else 18
-    ema_signal = 9 if price_len >= 30 else 6
+    volatility_ratio = calculate_atr(all_prices, 20) / calculate_atr(all_prices, 50)
+    ema_short = 12 if volatility_ratio < 1.5 else 8
+    ema_long = 26 if volatility_ratio < 1.5 else 18
+    ema_signal = 9 if volatility_ratio < 1.5 else 6
     
     ema_12 = calculate_ema_series(all_prices, ema_short)[-1] if price_len >= ema_short else None
     ema_26 = calculate_ema_series(all_prices, ema_long)[-1] if price_len >= ema_long else None
@@ -190,12 +191,12 @@ def decide(current_price, price_history, news_context):
     macd_hist_delta = macd_histogram - prev_macd_histogram
     macd_hist_acceleration = macd_hist_delta - (macd_hist_series[-3] - macd_hist_series[-2]) if len(macd_hist_series) >= 3 else 0
 
-    is_high_volatility = short_atr > (long_atr * 1.75)
-    is_extreme_volatility = short_atr > (long_atr * 2.0)
+    is_high_volatility = volatility_ratio > 1.75
+    is_extreme_volatility = volatility_ratio > 2.0
 
     is_long_term_downtrend = current_price < sma_200 if sma_200 is not None else False
     is_crash_velocity = roc_20 < -15.0
-    is_crisis_regime = (is_long_term_downtrend and is_high_volatility) or is_crash_velocity
+    is_crisis_regime = (is_long_term_downtrend and is_high_volatility) or is_crash_velocity or ("yield curve inversion" in context_lower)
 
     is_deeply_oversold = rsi < 25
     is_extreme_crash_velocity = roc_20 < -18.0
