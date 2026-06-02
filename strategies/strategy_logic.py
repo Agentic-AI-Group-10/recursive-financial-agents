@@ -155,7 +155,8 @@ def calculate_sentiment_score(news_context):
         "margin squeeze": -2.8, "deleveraging": -2.6, "credit expansion": 2.4,
         "policy clarity": 2.5, "market stability": 2.6, "economic resilience": 2.7,
         "bullish momentum": 2.5, "bearish momentum": -2.5, "market breadth contraction": -1.8,
-        "supply chain issues": -2.4, "interest rate pause": 2.3, "geopolitical tension": -2.3
+        "supply chain issues": -2.4, "interest rate pause": 2.3, "geopolitical tension": -2.3,
+        "market crash": -3.5, "equity plunge": -3.4, "liquidity freeze": -3.3, "debt ceiling": -3.1
     }
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent", "unlikely", "avoid", "no signs of", "unlikely to", "lack", "absence", "never", "none", "neglect", "without", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "never again", "no longer", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "without any", "lack any", "fail any", "struggle any", "prevent any", "avoid any", "unlikely any", "neglect any", "no longer any", "lack of any", "fail of any", "struggle of any", "prevent of any", "avoid of any", "unlikely of any", "neglect of any", "doesn't", "doesn't show", "doesn't indicate", "doesn't suggest", "isn't showing", "isn't indicating", "isn't suggesting", "lacks", "fails to", "struggles to", "avoids", "prevents", "unlikely to", "avoiding", "lacking", "failing to", "struggling to", "preventing", "avoiding", "unlikely showing", "lacking any", "failing any", "struggling any", "preventing any", "avoiding any", "unlikely any"]
     net_sentiment_score = 0.0
@@ -169,6 +170,8 @@ def calculate_sentiment_score(news_context):
                 is_negated = not is_negated
             if is_negated:
                 weight *= 0.1
+            recency_factor = 1.0 - (match.start() / max(1, len(context_lower)))
+            weight *= (1.0 + recency_factor * 0.5)
             net_sentiment_score += -weight if is_negated else weight
     return net_sentiment_score
 
@@ -230,17 +233,17 @@ def decide(current_price, price_history, news_context):
 
     is_long_term_downtrend = current_price < sma_200 if sma_200 is not None else False
     is_crash_velocity = roc_20 < -18.0
-    is_crisis_regime = (is_long_term_downtrend and is_high_volatility) or is_crash_velocity or ("yield curve inversion" in context_lower) or "banking crisis" in context_lower or "sovereign debt" in context_lower or "financial crisis" in context_lower or "systemic risk" in context_lower
+    is_crisis_regime = (is_long_term_downtrend and is_high_volatility) or is_crash_velocity or ("yield curve inversion" in context_lower) or "banking crisis" in context_lower or "sovereign debt" in context_lower or "financial crisis" in context_lower or "systemic risk" in context_lower or "market crash" in context_lower
 
     is_deeply_oversold = rsi < 25
     is_extreme_crash_velocity = roc_20 < -22.0
     is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold and current_price < donchian_low_30 and (short_atr > long_atr * 1.2) and current_price < keltner_lower_band and current_price > keltner_lower_band - (short_atr * 0.5)
 
-    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 15 and ema_12 > ema_26 and sentiment_score > -1.5 and macd_hist_acceleration > 0 and signal_line[-1] < macd_histogram and ichimoku_a > ichimoku_b and current_price > ichimoku_a:
+    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 15 and ema_12 > ema_26 and sentiment_score > -1.5 and macd_hist_acceleration > 0 and signal_line[-1] < macd_histogram and ichimoku_a > ichimoku_b and current_price > ichimoku_a and current_price > ichimoku_lagging:
         return "BUY"
 
     if is_crisis_regime:
-        is_recovering_from_oversold = rsi > 40 and macd_hist_delta > 0 and stochastic_oscillator > 85 and sentiment_score > -0.5 and ichimoku_a > ichimoku_b and current_price > ichimoku_a
+        is_recovering_from_oversold = rsi > 40 and macd_hist_delta > 0 and stochastic_oscillator > 85 and sentiment_score > -0.5 and ichimoku_a > ichimoku_b and current_price > ichimoku_a and current_price > ichimoku_lagging
         if is_recovering_from_oversold:
             return "BUY"
         if macd_histogram < 0 or current_price < sma_50:
@@ -280,8 +283,9 @@ def decide(current_price, price_history, news_context):
     is_ema_crossover = ema_12 is not None and ema_26 is not None and ema_12 > ema_26
     is_bollinger_in_range = current_price > bollinger_lower and current_price < bollinger_upper
     is_ichimoku_cloud_positive = ichimoku_a > ichimoku_b and current_price > ichimoku_a
+    is_lagging_positive = current_price > ichimoku_lagging
 
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_keltner_channel and is_bollinger_in_range and stochastic_oscillator > 30 and is_ema_crossover and macd_hist_acceleration > 0 and is_ichimoku_cloud_positive:
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_keltner_channel and is_bollinger_in_range and stochastic_oscillator > 30 and is_ema_crossover and macd_hist_acceleration > 0 and is_ichimoku_cloud_positive and is_lagging_positive:
         return "BUY"
 
     return "HOLD"
