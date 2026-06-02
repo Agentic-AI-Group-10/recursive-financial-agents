@@ -95,8 +95,8 @@ def calculate_bollinger_bands(prices, period=20, num_std_dev=2):
 
 def decide(current_price, price_history, news_context):
     """
-    A self-improved, multi-regime trading strategy with asymmetric exit logic
-    and a long-term trend filter to improve risk management and reduce passivity.
+    A self-improved, multi-regime trading strategy with a decoupled, dynamic exit
+    mechanism to address passivity and reduce drawdowns.
 
     Parameters:
         current_price (float): The current day's closing price for SPY.
@@ -106,7 +106,7 @@ def decide(current_price, price_history, news_context):
     Returns:
         str: "BUY", "SELL", or "HOLD"
     """
-    # --- 1. Sentiment Analysis (Unchanged from robust parent) ---
+    # --- 1. Sentiment Analysis ---
     context_lower = news_context.lower()
     sentiment_keywords = {
         "fed pivot": 3.0, "rate cut": 2.5, "stimulus": 2.0, "soft landing": 2.0,
@@ -117,7 +117,7 @@ def decide(current_price, price_history, news_context):
         "consumer confidence": 1.5,
         "rate hike": -2.5, "recession": -2.5, "crisis": -2.5, "bankruptcy": -2.5,
         "hard landing": -2.5, "stagflation": -2.5, "hawkish": -2.0, "bearish": -2.0,
-        "plunge": -2.0, "inflation": -2.0, "sell-off": -2.0, "weak earnings": -2.0,
+        "plunge": -2.0, "hot inflation": -2.5, "sell-off": -2.0, "weak earnings": -2.0,
         "geopolitical risk": -2.0, "market turmoil": -2.0, "credit crunch": -2.5,
         "tightening": -1.5, "miss": -1.5, "downgrade": -1.5, "tariff": -1.5,
         "supply chain disruption": -1.5, "uncertainty": -1.5, "weak jobs": -2.0
@@ -131,94 +131,101 @@ def decide(current_price, price_history, news_context):
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
             net_sentiment_score += -weight if is_negated else weight
 
-    # --- 2. Technical Indicators & Regime Detection ---
+    # --- 2. Technical Indicators & Adaptive Regime Detection ---
     all_prices = price_history + [current_price]
     
     # Define periods
+    FAST_EMA_PERIOD = 10 # For dynamic exit
     SHORT_EMA_PERIOD = 12
     LONG_EMA_PERIOD = 26
     MACD_SIGNAL_PERIOD = 9
     RSI_PERIOD = 14
     BB_PERIOD = 20
     MEDIUM_TERM_SMA_PERIOD = 50
-    LONG_TERM_SMA_PERIOD = 200 # NEW: Long-term trend filter
     VOL_SHORT_PERIOD = 20
     VOL_LONG_PERIOD = 100
 
-    required_history_length = max(LONG_EMA_PERIOD + MACD_SIGNAL_PERIOD, VOL_LONG_PERIOD + 1, LONG_TERM_SMA_PERIOD)
+    required_history_length = max(LONG_EMA_PERIOD + MACD_SIGNAL_PERIOD, VOL_LONG_PERIOD + 1)
     if len(all_prices) < required_history_length:
         return "HOLD"
 
     # Calculate core indicators
+    fast_ema = calculate_ema(all_prices, FAST_EMA_PERIOD)
     short_ema = calculate_ema(all_prices, SHORT_EMA_PERIOD)
     long_ema = calculate_ema(all_prices, LONG_EMA_PERIOD)
     rsi = calculate_rsi(all_prices, RSI_PERIOD)
     macd_histogram = calculate_macd(all_prices, SHORT_EMA_PERIOD, LONG_EMA_PERIOD, MACD_SIGNAL_PERIOD)
     _, upper_band, lower_band = calculate_bollinger_bands(all_prices, BB_PERIOD)
-    medium_sma = calculate_sma(all_prices, MEDIUM_TERM_SMA_PERIOD)
-    long_sma = calculate_sma(all_prices, LONG_TERM_SMA_PERIOD)
 
-    if any(v is None for v in [short_ema, long_ema, rsi, macd_histogram, upper_band, medium_sma, long_sma]):
+    if any(v is None for v in [fast_ema, short_ema, long_ema, rsi, macd_histogram, upper_band]):
         return "HOLD"
 
-    # Adaptive Volatility Regime (Unchanged from robust parent)
+    # Adaptive Volatility Regime
     log_returns = np.log(np.array(all_prices)[1:] / np.array(all_prices)[:-1])
     short_term_vol = np.std(log_returns[-VOL_SHORT_PERIOD:])
     long_term_vol = np.std(log_returns[-VOL_LONG_PERIOD:])
     is_high_volatility = (short_term_vol > long_term_vol * 1.5) and (short_term_vol > 0.015)
 
-    # --- 3. Multi-Regime Decision Logic with Asymmetric Exits ---
+    # --- 3. Decoupled Buy & Sell Signal Generation ---
     buy_signal = False
     sell_signal = False
 
-    # NEW: Global Risk Filter - Avoid buying in a long-term bear market
-    is_long_term_uptrend = current_price > long_sma
-
+    # --- A. ENTRY LOGIC (When to Buy) ---
     if is_high_volatility:
-        # === CRISIS MODE: High-conviction trend-following ===
-        bullish_trend = short_ema > long_ema
-        
-        # Entry: Strict, requires strong confirmation
-        if net_sentiment_score >= 2.5 and bullish_trend and macd_histogram > 0 and rsi < 65 and is_long_term_uptrend:
+        # CRISIS MODE: High-conviction trend-following
+        if (net_sentiment_score >= 2.5 and 
+            short_ema > long_ema and 
+            macd_histogram > 0 and 
+            rsi < 65):
             buy_signal = True
-        
-        # Exit: Faster exit based on trend break or strong negative signals
-        if not bullish_trend or (net_sentiment_score <= -2.5 and macd_histogram < 0):
-            sell_signal = True
     else:
-        # === NORMAL MODE: Adaptive with improved risk management ===
+        # NORMAL MODE: Adaptive
         trend_strength = abs(short_ema - long_ema) / long_ema
         is_choppy_market = trend_strength < 0.005
 
         if not is_choppy_market:
-            # Sub-Regime: Normal Trending Market
-            bullish_trend = short_ema > long_ema
-            
-            # Entry (IMPROVED): Relaxed sentiment to increase participation
-            if bullish_trend and macd_histogram > 0 and rsi < 75 and net_sentiment_score > -1.5 and is_long_term_uptrend:
+            # Normal Trending Market
+            if (net_sentiment_score >= 0.5 and # Slightly more permissive to increase activity
+                short_ema > long_ema and 
+                macd_histogram > 0 and 
+                rsi < 70):
                 buy_signal = True
-            
-            # Exit (IMPROVED): Asymmetric & faster to reduce drawdowns
-            # Sell if medium-term trend breaks OR momentum dies OR sentiment turns very negative
-            if current_price < medium_sma or macd_histogram < 0 or net_sentiment_score < -2.5:
-                sell_signal = True
         else:
-            # Sub-Regime: Choppy / Ranging Market (Mean-Reversion)
-            
-            # Entry (Buy the dip): Logic is sound, requires long-term trend confirmation
-            if rsi < 30 and current_price < lower_band and net_sentiment_score > -2.0 and is_long_term_uptrend:
-                buy_signal = True
-            
-            # Exit (Sell the rip or if dip fails):
-            # Sell into strength OR if the primary trend breaks (stop-loss)
-            if (rsi > 70 and current_price > upper_band) or not is_long_term_uptrend:
-                sell_signal = True
+            # Choppy / Ranging Market (Mean-Reversion)
+            medium_sma = calculate_sma(all_prices, MEDIUM_TERM_SMA_PERIOD)
+            if medium_sma is not None:
+                if (rsi < 30 and 
+                    current_price < lower_band and 
+                    net_sentiment_score > -2.0 and 
+                    current_price > medium_sma): # Buy dips in a larger uptrend
+                    buy_signal = True
+
+    # --- B. EXIT LOGIC (When to Sell) ---
+    # B.1. DYNAMIC EXIT (Trend-Weakening Signal - NEW)
+    # This is the primary improvement: exit early if momentum fades.
+    if current_price < fast_ema and rsi < 48:
+        sell_signal = True
+
+    # B.2. FULL REVERSAL SIGNAL (Original Logic)
+    # Sell if the main trend indicators fully reverse with negative sentiment.
+    if (net_sentiment_score <= -2.0 and 
+        short_ema < long_ema and 
+        macd_histogram < 0 and 
+        rsi > 35):
+        sell_signal = True
+        
+    # B.3. MEAN-REVERSION EXIT (Sell the Rip)
+    # Only applies in non-high-volatility environments.
+    if not is_high_volatility:
+        if (rsi > 70 and 
+            current_price > upper_band and 
+            net_sentiment_score < 2.0):
+            sell_signal = True
 
     # --- 4. Final Decision ---
-    # Prioritize safety: if signals conflict, hold.
-    if buy_signal and not sell_signal:
+    if buy_signal:
         return "BUY"
-    elif sell_signal and not buy_signal:
+    elif sell_signal:
         return "SELL"
-    
-    return "HOLD"
+    else:
+        return "HOLD"
