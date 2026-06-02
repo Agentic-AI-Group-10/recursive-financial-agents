@@ -76,43 +76,32 @@ def calculate_roc(prices, period=20):
     return ((prices[-1] - prices[-1 - period]) / prices[-1 - period]) * 100
 
 def calculate_bollinger_bands(prices, period=20, num_std_dev=2):
-    """Calculates the upper and lower Bollinger Bands."""
+    """Calculates Bollinger Bands."""
     if len(prices) < period:
-        return None, None
-    prices_slice = prices[-period:]
-    sma = np.mean(prices_slice)
-    std_dev = np.std(prices_slice)
+        return None, None, None
+    prices_arr = np.array(prices[-period:], dtype=float)
+    sma = np.mean(prices_arr)
+    std_dev = np.std(prices_arr)
     upper_band = sma + (std_dev * num_std_dev)
     lower_band = sma - (std_dev * num_std_dev)
-    return upper_band, lower_band
-
-def calculate_choppiness_index(prices, period=14):
-    """Calculates a trend efficiency ratio as a proxy for choppiness."""
-    if len(prices) < period + 1:
-        return None
-    relevant_prices = np.array(prices[-period-1:], dtype=float)
-    net_change = abs(relevant_prices[-1] - relevant_prices[0])
-    sum_of_changes = np.sum(np.abs(np.diff(relevant_prices)))
-    if sum_of_changes == 0:
-        return 1.0 # Perfect trend (no volatility)
-    return net_change / sum_of_changes
+    return upper_band, sma, lower_band
 
 def decide(current_price, price_history, news_context):
     """
     SELF-IMPROVED STRATEGY V3:
-    This version refines the successful V2 strategy with three key architectural upgrades:
-    1.  Dynamic Volatility-Based Exits (Chandelier Exit): Replaces the fixed
-        percentage stop-loss with a trailing stop based on a multiple of the
-        Average True Range (ATR) below the recent high. This adapts to market
-        volatility, protecting profits more effectively in trends.
-    2.  Choppiness Filter: Introduces a Choppiness Index (trend efficiency ratio)
-        to the buy logic. This helps the strategy avoid taking positions in
-        sideways, non-trending markets, reducing whipsaw losses.
-    3.  Adaptive Overbought/Oversold Levels (Bollinger Bands): Profit-taking
-        signals are now triggered by the price exceeding the upper Bollinger Band
-        while momentum fades, a more dynamic approach than a fixed RSI threshold.
+    This version enhances the successful V2 strategy by introducing dynamic,
+    volatility-adaptive mechanisms for improved robustness and performance.
+    1.  Adaptive Overbought/Oversold with Bollinger Bands: Replaces static RSI
+        thresholds for profit-taking with Bollinger Bands, allowing sell signals
+        to adapt to the market's current volatility.
+    2.  Dynamic ATR-based Trailing Stop: The fixed percentage stop-loss is
+        upgraded to a trailing stop based on the Average True Range (ATR),
+        providing more intelligent, volatility-adjusted risk management.
+    3.  Refined Crisis Regime Logic: The crisis aversion module is tuned to
+        require a confirmed momentum breakdown (MACD crossover) before selling,
+        reducing whipsaws during highly volatile but recoverable market dips.
     """
-    # --- 1. Sentiment Analysis ---
+    # --- 1. Sentiment Analysis with Density Factoring ---
     context_lower = news_context.lower()
     sentiment_keywords = {
         "fed pivot": 3.0, "rate cut": 2.5, "quantitative easing": 2.5, "soft landing": 2.5,
@@ -132,27 +121,33 @@ def decide(current_price, price_history, news_context):
     }
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent"]
     net_sentiment_score = 0.0
+    keyword_count = 0
     for keyword, weight in sentiment_keywords.items():
         pattern = r'\b' + re.escape(keyword) + r'\b'
         for match in re.finditer(pattern, context_lower):
+            keyword_count += 1
             pre_context = context_lower[max(0, match.start() - 30):match.start()]
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
             net_sentiment_score += -weight if is_negated else weight
+    
+    if keyword_count > 1:
+        density_factor = 1 + math.log1p(keyword_count - 1)
+        net_sentiment_score *= density_factor
 
     # --- 2. Technical Indicators & State Calculation ---
     all_prices = price_history + [current_price]
 
-    # Indicator Periods
+    # Indicator Periods & Parameters
     SMA_TREND_LONG = 100
     SMA_TREND_MEDIUM = 50
     RSI_PERIOD = 14
-    ATR_PERIOD = 14
+    ATR_SHORT = 10
+    ATR_LONG = 50
     ROC_CRASH_PERIOD = 20
-    STOP_LOOKBACK = 22
-    CHOP_PERIOD = 14
-    BB_PERIOD = 20
+    STOP_LOSS_LOOKBACK = 20
+    ATR_STOP_MULTIPLIER = 2.5 # Multiplier for ATR trailing stop
 
-    required_history_length = max(SMA_TREND_LONG + 1, 50)
+    required_history_length = max(SMA_TREND_LONG + 1, ATR_LONG + 1, ROC_CRASH_PERIOD + 1, 50)
     if len(all_prices) < required_history_length:
         return "HOLD"
 
@@ -161,14 +156,15 @@ def decide(current_price, price_history, news_context):
     sma_50 = calculate_sma(all_prices, SMA_TREND_MEDIUM)
     rsi = calculate_rsi(all_prices, RSI_PERIOD)
     _, _, macd_hist_series = calculate_macd_series(all_prices)
-    atr = calculate_atr(all_prices, ATR_PERIOD)
+    short_atr = calculate_atr(all_prices, ATR_SHORT)
+    long_atr = calculate_atr(all_prices, ATR_LONG)
     roc_20 = calculate_roc(all_prices, ROC_CRASH_PERIOD)
-    donchian_high = np.max(all_prices[-STOP_LOOKBACK:])
-    upper_bb, _ = calculate_bollinger_bands(all_prices, BB_PERIOD)
-    chop_index = calculate_choppiness_index(all_prices, CHOP_PERIOD)
+    donchian_high_20 = np.max(all_prices[-STOP_LOSS_LOOKBACK:]) if len(all_prices) >= STOP_LOSS_LOOKBACK else None
+    upper_bb, _, _ = calculate_bollinger_bands(all_prices)
+    atr_for_stop = calculate_atr(all_prices, period=14)
 
     # Null check for all indicators
-    if any(v is None for v in [sma_100, sma_50, rsi, atr, roc_20, donchian_high, upper_bb, chop_index]) or macd_hist_series is None or len(macd_hist_series) < 2:
+    if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_20, upper_bb, atr_for_stop]) or macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
 
     macd_histogram = macd_hist_series[-1]
@@ -177,8 +173,9 @@ def decide(current_price, price_history, news_context):
 
     # --- 3. Regime Detection ---
     is_long_term_downtrend = current_price < sma_100
+    is_high_volatility = short_atr > (long_atr * 1.75)
     is_crash_velocity = roc_20 < -15.0
-    is_crisis_regime = is_long_term_downtrend or is_crash_velocity
+    is_crisis_regime = (is_long_term_downtrend and is_high_volatility) or is_crash_velocity
 
     is_deeply_oversold = rsi < 25
     is_extreme_crash_velocity = roc_20 < -18.0
@@ -192,16 +189,17 @@ def decide(current_price, price_history, news_context):
 
     # REGIME 2: CRISIS AVERSION
     if is_crisis_regime:
-        if macd_histogram < 0 or current_price < sma_50:
+        # Sell only on a confirmed momentum breakdown within the crisis to avoid whipsaws
+        if macd_histogram < 0 and prev_macd_histogram >= 0:
             return "SELL"
-        return "HOLD"
+        return "HOLD" # Otherwise, stay defensive in cash and wait for confirmation
 
     # REGIME 3: NORMAL MARKET CONDITIONS
 
     # --- SELL LOGIC (Risk Management First) ---
-    # Priority 1: Chandelier Exit (Dynamic Trailing Stop-Loss)
-    chandelier_exit = donchian_high - (atr * 3.0)
-    if current_price < chandelier_exit:
+    # Priority 1: Dynamic ATR-based Trailing Stop-Loss.
+    stop_loss_price = donchian_high_20 - (atr_for_stop * ATR_STOP_MULTIPLIER)
+    if current_price < stop_loss_price:
         return "SELL"
 
     # Priority 2: Standard trend breakdown signal.
@@ -211,20 +209,20 @@ def decide(current_price, price_history, news_context):
     if is_primary_downtrend and is_momentum_confirming_down and is_sentiment_permissive_for_sell:
         return "SELL"
 
-    # Priority 3: Profit-taking on over-extension with FADING momentum.
+    # Priority 3: Profit-taking on volatility-defined overbought conditions with FADING momentum.
     is_momentum_fading = macd_hist_delta < 0
-    is_overextended = current_price > upper_bb
-    if is_overextended and is_momentum_fading:
+    is_overbought_by_bb = current_price > upper_bb
+    if is_overbought_by_bb and is_momentum_fading:
         return "SELL"
 
     # --- BUY LOGIC ---
     is_primary_uptrend = current_price > sma_50
     is_momentum_confirming_up = macd_histogram > 0 and prev_macd_histogram <= 0
-    is_not_overbought = rsi < 78
+    is_not_overbought_by_bb = current_price < upper_bb # Use Bollinger Bands instead of static RSI
     is_sentiment_permissive_for_buy = net_sentiment_score > -3.0
-    is_trending_efficiently = chop_index > 0.35 # Filter out sideways chop
+    is_sufficient_volatility = short_atr > (long_atr * 0.6)
 
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_trending_efficiently:
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought_by_bb and is_sentiment_permissive_for_buy and is_sufficient_volatility:
         return "BUY"
 
     # Default action is to hold the current position.
