@@ -6,54 +6,101 @@ def calculate_ema_series(data, period):
     if len(data) < period:
         return np.array([])
     data_arr = np.array(data, dtype=float)
-    return pd.Series(data_arr).ewm(span=period, adjust=False).mean().to_numpy()[period-1:]
+    try:
+        return pd.Series(data_arr).ewm(span=period, adjust=False).mean().to_numpy()[period-1:]
+    except ImportError:
+        ema_values = np.zeros(len(data_arr) - period + 1, dtype=float)
+        if len(data_arr) >= period:
+            ema_values[0] = np.mean(data_arr[:period])
+            multiplier = 2 / (period + 1)
+            for i in range(1, len(ema_values)):
+                ema_values[i] = (data_arr[i + period - 1] - ema_values[i-1]) * multiplier + ema_values[i-1]
+        return ema_values
 
 def calculate_bollinger_bands(prices, period=20):
     if len(prices) < period:
         return None, None, None
     sma = np.mean(prices[-period:])
     std = np.std(prices[-period:])
-    return sma + 2*std, sma - 2*std, sma
+    upper = sma + (std * 2)
+    lower = sma - (std * 2)
+    return upper, lower, sma
 
-def calculate_macd_series(prices):
-    if len(prices) < 26:
+def calculate_macd_series(prices, short_period=12, long_period=26, signal_period=9):
+    if len(prices) < long_period: 
         return None, None, None
-    short_ema = calculate_ema_series(prices, 12)
-    long_ema = calculate_ema_series(prices, 26)
-    macd_line = short_ema[-len(long_ema):] - long_ema
-    signal_line = calculate_ema_series(macd_line, 9)
-    histogram = macd_line[-len(signal_line):] - signal_line
-    return macd_line[-1], signal_line[-1], histogram[-1]
+    short_ema_series = calculate_ema_series(prices, short_period)
+    long_ema_series = calculate_ema_series(prices, long_period)
+    if len(short_ema_series) == 0 or len(long_ema_series) == 0:
+        return None, None, None
+    macd_line = short_ema_series[len(short_ema_series)-len(long_ema_series):] - long_ema_series
+    if len(macd_line) < signal_period: 
+        return macd_line, None, None
+    signal_line = calculate_ema_series(macd_line, signal_period)
+    if len(signal_line) == 0:
+        return None, None, None
+    histogram = macd_line[len(macd_line)-len(signal_line):] - signal_line
+    return macd_line, signal_line, histogram
 
 def calculate_rsi(prices, period=14):
     if len(prices) < period + 1:
         return None
-    deltas = np.diff(prices)
-    seed_gain = np.sum(deltas[:period][deltas[:period] > 0])
-    seed_loss = np.sum(-deltas[:period][deltas[:period] < 0])
-    avg_gain, avg_loss = seed_gain/period, seed_loss/period
+    prices_arr = np.array(prices, dtype=float)
+    deltas = np.diff(prices_arr)
+    seed_gains = deltas[:period][deltas[:period] >= 0].sum()
+    seed_losses = -deltas[:period][deltas[:period] < 0].sum()
+    avg_gain = seed_gains / period
+    avg_loss = seed_losses / period
     for i in range(period, len(deltas)):
         delta = deltas[i]
-        gain = delta if delta > 0 else 0
-        loss = -delta if delta < 0 else 0
-        avg_gain = (avg_gain * (period-1) + gain) / period
-        avg_loss = (avg_loss * (period-1) + loss) / period
-    return 100 - (100 / (1 + avg_gain/avg_loss)) if avg_loss != 0 else 100
+        gain = delta if delta >= 0 else 0.0
+        loss = -delta if delta < 0 else 0.0
+        avg_gain = (avg_gain * (period - 1) + gain) / period
+        avg_loss = (avg_loss * (period - 1) + loss) / period
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return 100.0 - (100.0 / (1.0 + rs))
 
 def calculate_atr(prices, period=14):
     if len(prices) < period + 1:
         return None
-    ranges = np.abs(np.diff(prices))
-    return calculate_ema_series(ranges, period)[-1]
+    prices_arr = np.array(prices, dtype=float)
+    price_ranges = np.abs(np.diff(prices_arr))
+    atr_series = calculate_ema_series(price_ranges, period)
+    return atr_series[-1] if len(atr_series) > 0 else None
 
-def calculate_obv(prices, volumes):
-    if len(prices) < 2:
+def calculate_roc(prices, period=20):
+    if len(prices) < period + 1:
         return None
-    obv = np.zeros(len(prices))
-    obv[0] = volumes[0]
-    for i in range(1, len(prices)):
-        obv[i] = obv[i-1] + volumes[i] if prices[i] > prices[i-1] else (obv[i-1] - volumes[i] if prices[i] < prices[i-1] else obv[i-1])
-    return obv[-1]
+    if prices[-1 - period] == 0: 
+        return 0.0
+    return ((prices[-1] - prices[-1 - period]) / prices[-1 - period]) * 100
+
+def calculate_donchian_channel(prices, period=20):
+    if len(prices) < period:
+        return None, None
+    donchian_high = np.max(prices[-period:])
+    donchian_low = np.min(prices[-period:])
+    upper_band = donchian_high
+    lower_band = donchian_low
+    return upper_band, lower_band
+
+def calculate_stochastic_oscillator(prices, period=14):
+    if len(prices) < period:
+        return None
+    lowest_low = np.min(prices[-period:])
+    highest_high = np.max(prices[-period:])
+    return ((prices[-1] - lowest_low) / (highest_high - lowest_low)) * 100
+
+def calculate_keltner_channel(prices, period=20):
+    if len(prices) < period:
+        return None, None
+    sma = np.mean(prices[-period:])
+    atr = calculate_atr(prices, period)
+    upper_band = sma + (atr * 2)
+    lower_band = sma - (atr * 2)
+    return upper_band, lower_band
 
 def calculate_sentiment_score(news_context):
     context_lower = news_context.lower()
@@ -98,66 +145,133 @@ def calculate_sentiment_score(news_context):
         "market crash": -3.5, "equity plunge": -3.4, "liquidity freeze": -3.3, "debt ceiling": -3.1
     }
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent", "unlikely", "avoid", "no signs of", "unlikely to", "lack", "absence", "never", "none", "neglect", "without", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "never again", "no longer", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "without any", "lack any", "fail any", "struggle any", "prevent any", "avoid any", "unlikely any", "neglect any", "no longer any", "lack of any", "fail of any", "struggle of any", "prevent of any", "avoid of any", "unlikely of any", "neglect of any", "doesn't", "doesn't show", "doesn't indicate", "doesn't suggest", "isn't showing", "isn't indicating", "isn't suggesting", "lacks", "fails to", "struggles to", "avoids", "prevents", "unlikely to", "avoiding", "lacking", "failing to", "struggling to", "preventing", "avoiding", "unlikely showing", "lacking any", "failing any", "struggling any", "preventing any", "avoiding any", "unlikely any"]
-    score = 0.0
+    net_sentiment_score = 0.0
     for keyword, weight in sentiment_keywords.items():
         pattern = r'\b' + re.escape(keyword) + r'\b'
         for match in re.finditer(pattern, context_lower):
-            pre_context = context_lower[max(0, match.start()-100):match.start()]
-            post_context = context_lower[match.end():match.end()+100]
-            is_negated = any(neg in pre_context for neg in negation_words)
-            if any(neg in post_context for neg in negation_words):
+            pre_context = context_lower[max(0, match.start() - 100):match.start()]
+            post_context = context_lower[match.end():match.end() + 100]
+            is_negated = any(neg_word in pre_context for neg_word in negation_words)
+            if any(neg_word in post_context for neg_word in negation_words):
                 is_negated = not is_negated
             if is_negated:
-                weight *= 0.2
+                weight *= 0.1
             recency_factor = 1.0 - (match.start() / max(1, len(context_lower)))
             weight *= (1.0 + recency_factor * 0.5)
-            score += -weight if is_negated else weight
-    return score
+            net_sentiment_score += -weight if is_negated else weight
+    return net_sentiment_score
+
+def calculate_ichimoku(prices, conversion_period=9, base_period=26, leading_span_b_period=52, lagging_span_period=26):
+    if len(prices) < max(conversion_period, base_period, leading_span_b_period, lagging_span_period):
+        return None, None, None, None, None
+    prices_arr = np.array(prices, dtype=float)
+    conversion_line = (np.max(prices_arr[-conversion_period:]) + np.min(prices_arr[-conversion_period:])) / 2
+    base_line = (np.max(prices_arr[-base_period:]) + np.min(prices_arr[-base_period:])) / 2
+    leading_span_a = (conversion_line + base_line) / 2
+    leading_span_b = (np.max(prices_arr[-leading_span_b_period:]) + np.min(prices_arr[-leading_span_b_period:])) / 2
+    lagging_span = prices_arr[-lagging_span_period]
+    return conversion_line, base_line, leading_span_a, leading_span_b, lagging_span
 
 def decide(current_price, price_history, news_context):
+    context_lower = news_context.lower()
+    sentiment_score = calculate_sentiment_score(news_context)
     all_prices = price_history + [current_price]
     price_len = len(all_prices)
-    
+
     if price_len < 50:
         return "HOLD"
-    
+
     sma_50 = np.mean(all_prices[-50:])
     sma_200 = np.mean(all_prices[-200:]) if price_len >= 200 else None
     
     volatility_ratio = calculate_atr(all_prices, 20) / calculate_atr(all_prices, 50)
     ema_short = 12 if volatility_ratio < 1.5 else 8
     ema_long = 26 if volatility_ratio < 1.5 else 18
+    ema_signal = 9 if volatility_ratio < 1.5 else 6
     
     ema_12 = calculate_ema_series(all_prices, ema_short)[-1] if price_len >= ema_short else None
     ema_26 = calculate_ema_series(all_prices, ema_long)[-1] if price_len >= ema_long else None
+    ema_9 = calculate_ema_series(all_prices, ema_signal)[-1] if price_len >= ema_signal else None
     
     rsi_period = 14 if volatility_ratio < 1.75 else 7
     rsi = calculate_rsi(all_prices, rsi_period)
-    
-    macd_line, signal_line, histogram = calculate_macd_series(all_prices)
-    
-    if any(v is None for v in [sma_50, ema_12, ema_26, rsi, macd_line, signal_line, histogram]):
+    macd_line, signal_line, macd_hist_series = calculate_macd_series(all_prices)
+    short_atr = calculate_atr(all_prices, 20)
+    long_atr = calculate_atr(all_prices, 50)
+    roc_20 = calculate_roc(all_prices, 20)
+    donchian_high_30, donchian_low_30 = calculate_donchian_channel(all_prices, 30)
+    stochastic_oscillator = calculate_stochastic_oscillator(all_prices)
+    keltner_upper_band, keltner_lower_band = calculate_keltner_channel(all_prices)
+    bollinger_upper, bollinger_lower, bollinger_sma = calculate_bollinger_bands(all_prices)
+    ichimoku_conversion, ichimoku_base, ichimoku_a, ichimoku_b, ichimoku_lagging = calculate_ichimoku(all_prices)
+
+    if any(v is None for v in [sma_50, ema_12, ema_26, ema_9, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, stochastic_oscillator]) or \
+       macd_hist_series is None or len(macd_hist_series) < 2 or bollinger_upper is None or ichimoku_a is None:
         return "HOLD"
-    
+
+    macd_histogram = macd_hist_series[-1]
+    prev_macd_histogram = macd_hist_series[-2]
+    macd_hist_delta = macd_histogram - prev_macd_histogram
+    macd_hist_acceleration = macd_hist_delta - (macd_hist_series[-3] - macd_hist_series[-2]) if len(macd_hist_series) >= 3 else 0
+
     is_high_volatility = volatility_ratio > 1.75
     is_extreme_volatility = volatility_ratio > 2.0
-    
+
     is_long_term_downtrend = current_price < sma_200 if sma_200 is not None else False
-    is_crisis_regime = is_long_term_downtrend and is_high_volatility or "yield curve inversion" in news_context.lower()
-    
-    sentiment_score = calculate_sentiment_score(news_context)
-    
+    is_crash_velocity = roc_20 < -18.0
+    is_crisis_regime = (is_long_term_downtrend and is_high_volatility) or is_crash_velocity or ("yield curve inversion" in context_lower) or "banking crisis" in context_lower or "sovereign debt" in context_lower or "financial crisis" in context_lower or "systemic risk" in context_lower or "market crash" in context_lower
+
+    is_deeply_oversold = rsi < 25
+    is_extreme_crash_velocity = roc_20 < -22.0
+    is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold and current_price < donchian_low_30 and (short_atr > long_atr * 1.2) and current_price < keltner_lower_band and current_price > keltner_lower_band - (short_atr * 0.5)
+
+    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 15 and ema_12 > ema_26 and sentiment_score > -1.5 and macd_hist_acceleration > 0 and signal_line[-1] < macd_histogram and ichimoku_a > ichimoku_b and current_price > ichimoku_a and current_price > ichimoku_lagging:
+        return "BUY"
+
     if is_crisis_regime:
-        if rsi < 25 and histogram > 0 and current_price > sma_50 and sentiment_score > -1.5:
+        is_recovering_from_oversold = rsi > 40 and macd_hist_delta > 0 and stochastic_oscillator > 85 and sentiment_score > -0.5 and ichimoku_a > ichimoku_b and current_price > ichimoku_a and current_price > ichimoku_lagging
+        if is_recovering_from_oversold:
             return "BUY"
-        if rsi > 75 and histogram < 0 and current_price < sma_50 and sentiment_score < -2.5:
+        if macd_histogram < 0 or current_price < sma_50:
             return "SELL"
         return "HOLD"
-    
-    if rsi < 25 and histogram > 0 and ema_12 > ema_26 and current_price > sma_50 and sentiment_score > -1.5:
-        return "BUY"
-    
-    if rsi > 75 and histogram < 0 and ema_12 < ema_26 and current_price < sma_50 and sentiment_score < -1.5:
+
+    base_stop_loss_factor = 0.88
+    if is_extreme_volatility:
+        stop_loss_factor = 0.78
+    elif is_high_volatility:
+        stop_loss_factor = 0.83
+    else:
+        stop_loss_factor = base_stop_loss_factor
+
+    atr_stop = keltner_lower_band + (short_atr * 0.5)
+    if current_price < atr_stop and current_price < donchian_high_30 * stop_loss_factor:
         return "SELL"
-    
+
+    is_primary_downtrend = current_price < sma_50
+    is_momentum_confirming_down = macd_histogram < 0 and prev_macd_histogram >= 0
+    is_sentiment_permissive_for_sell = sentiment_score < 2.0
+    if is_primary_downtrend and is_momentum_confirming_down and is_sentiment_permissive_for_sell:
+        return "SELL"
+
+    is_momentum_fading = macd_hist_delta < 0
+    overbought_threshold = 85 if is_high_volatility else 82
+    is_extremely_overbought = rsi > overbought_threshold
+    if is_extremely_overbought and is_momentum_fading:
+        return "SELL"
+
+    is_primary_uptrend = current_price > sma_50 and (sma_200 is None or current_price > sma_200)
+    is_momentum_confirming_up = macd_histogram > 0 and prev_macd_histogram <= 0
+    is_not_overbought = rsi < (75 if is_high_volatility else 72)
+    is_sentiment_permissive_for_buy = sentiment_score > -2.5
+    is_sufficient_volatility = short_atr > (long_atr * 0.6)
+    is_price_in_keltner_channel = current_price > keltner_lower_band and current_price < keltner_upper_band
+    is_ema_crossover = ema_12 is not None and ema_26 is not None and ema_12 > ema_26
+    is_bollinger_in_range = current_price > bollinger_lower and current_price < bollinger_upper
+    is_ichimoku_cloud_positive = ichimoku_a > ichimoku_b and current_price > ichimoku_a
+    is_lagging_positive = current_price > ichimoku_lagging
+
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_keltner_channel and is_bollinger_in_range and stochastic_oscillator > 30 and is_ema_crossover and macd_hist_acceleration > 0 and is_ichimoku_cloud_positive and is_lagging_positive:
+        return "BUY"
+
     return "HOLD"
