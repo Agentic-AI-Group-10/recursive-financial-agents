@@ -1,6 +1,7 @@
 import numpy as np
 import re
 import math
+import pandas as pd
 
 # --- Helper Functions for Technical Indicators ---
 
@@ -10,7 +11,6 @@ def calculate_ema_series(data, period):
         return np.array([])
     data_arr = np.array(data, dtype=float)
     try:
-        import pandas as pd
         return pd.Series(data_arr).ewm(span=period, adjust=False).mean().to_numpy()[period-1:]
     except ImportError:
         ema_values = np.zeros(len(data_arr) - period + 1, dtype=float)
@@ -21,11 +21,30 @@ def calculate_ema_series(data, period):
                 ema_values[i] = (data_arr[i + period - 1] - ema_values[i-1]) * multiplier + ema_values[i-1]
         return ema_values
 
-def calculate_sma(prices, period):
-    """Calculates the Simple Moving Average (SMA) for the latest price."""
-    if len(prices) < period:
-        return None
-    return np.mean(prices[-period:])
+def calculate_macd_series(prices, short_period=12, long_period=26, signal_period=9):
+    """Calculates the MACD line, signal line, and histogram series."""
+    if len(prices) < long_period: 
+        return None, None, None
+    
+    short_ema_series = calculate_ema_series(prices, short_period)
+    long_ema_series = calculate_ema_series(prices, long_period)
+    
+    if len(short_ema_series) == 0 or len(long_ema_series) == 0:
+        return None, None, None
+
+    macd_line = short_ema_series[len(short_ema_series)-len(long_ema_series):] - long_ema_series
+    
+    if len(macd_line) < signal_period: 
+        return macd_line, None, None
+        
+    signal_line = calculate_ema_series(macd_line, signal_period)
+    
+    if len(signal_line) == 0:
+        return macd_line, None, None
+
+    histogram = macd_line[len(macd_line)-len(signal_line):] - signal_line
+    
+    return macd_line, signal_line, histogram
 
 def calculate_rsi(prices, period=14):
     """Calculates the Relative Strength Index (RSI) using Wilder's smoothing method."""
@@ -53,31 +72,6 @@ def calculate_rsi(prices, period=14):
     
     rs = avg_gain / avg_loss
     return 100.0 - (100.0 / (1.0 + rs))
-
-def calculate_macd_series(prices, short_period=12, long_period=26, signal_period=9):
-    """Calculates the MACD line, signal line, and histogram series."""
-    if len(prices) < long_period: 
-        return None, None, None
-    
-    short_ema_series = calculate_ema_series(prices, short_period)
-    long_ema_series = calculate_ema_series(prices, long_period)
-    
-    if len(short_ema_series) == 0 or len(long_ema_series) == 0:
-        return None, None, None
-
-    macd_line = short_ema_series[len(short_ema_series)-len(long_ema_series):] - long_ema_series
-    
-    if len(macd_line) < signal_period: 
-        return macd_line, None, None
-        
-    signal_line = calculate_ema_series(macd_line, signal_period)
-    
-    if len(signal_line) == 0:
-        return macd_line, None, None
-
-    histogram = macd_line[len(macd_line)-len(signal_line):] - signal_line
-    
-    return macd_line, signal_line, histogram
 
 def calculate_atr(prices, period=14):
     """Calculates Average True Range (ATR) using close-to-close volatility."""
@@ -120,6 +114,12 @@ def calculate_force_index(prices, volume):
     if len(prices) < 2 or len(volume) < 2:
         return None
     return np.sum(np.diff(prices) * np.diff(volume)) / len(volume)
+
+def calculate_sma(prices, period):
+    """Calculates the Simple Moving Average (SMA) for the latest price."""
+    if len(prices) < period:
+        return None
+    return np.mean(prices[-period:])
 
 def decide(current_price, price_history, news_context):
     context_lower = news_context.lower()
