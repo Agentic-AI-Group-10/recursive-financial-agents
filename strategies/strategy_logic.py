@@ -11,10 +11,8 @@ def calculate_ema_series(data, period):
     data_arr = np.array(data, dtype=float)
     try:
         import pandas as pd
-        # Using pandas is preferred for accuracy and standard implementation
         return pd.Series(data_arr).ewm(span=period, adjust=False).mean().to_numpy()[period-1:]
     except ImportError:
-        # Fallback pure-python EMA calculation
         ema_values = np.zeros(len(data_arr) - period + 1, dtype=float)
         ema_values[0] = np.mean(data_arr[:period])
         multiplier = 2 / (period + 1)
@@ -28,43 +26,26 @@ def calculate_sma(prices, period):
         return None
     return np.mean(prices[-period:])
 
-def calculate_rsi_series(prices, period=14):
-    """Calculates a full series of Relative Strength Index (RSI) values."""
+def calculate_rsi(prices, period=14):
+    """Calculates the Relative Strength Index (RSI) using Wilder's smoothing method."""
     if len(prices) < period + 1:
-        return np.array([])
+        return None
     prices_arr = np.array(prices, dtype=float)
     deltas = np.diff(prices_arr)
-    
     seed_gains = deltas[:period][deltas[:period] >= 0].sum()
     seed_losses = -deltas[:period][deltas[:period] < 0].sum()
-    
     avg_gain = seed_gains / period
     avg_loss = seed_losses / period
-    
-    rsi_values = np.zeros(len(deltas) - period + 1)
-    
-    if avg_loss == 0:
-        rs = np.inf
-    else:
-        rs = avg_gain / avg_loss
-    rsi_values[0] = 100.0 - (100.0 / (1.0 + rs))
-
     for i in range(period, len(deltas)):
         delta = deltas[i]
         gain = delta if delta >= 0 else 0.0
         loss = -delta if delta < 0 else 0.0
-        
         avg_gain = (avg_gain * (period - 1) + gain) / period
         avg_loss = (avg_loss * (period - 1) + loss) / period
-        
-        if avg_loss == 0:
-            rs = np.inf
-        else:
-            rs = avg_gain / avg_loss
-        
-        rsi_values[i - period + 1] = 100.0 - (100.0 / (1.0 + rs))
-        
-    return rsi_values
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return 100.0 - (100.0 / (1.0 + rs))
 
 def calculate_macd_series(prices, short_period=12, long_period=26, signal_period=9):
     """Calculates the MACD line, signal line, and histogram series."""
@@ -94,39 +75,53 @@ def calculate_roc(prices, period=20):
         return None
     return ((prices[-1] - prices[-1 - period]) / prices[-1 - period]) * 100
 
+def calculate_trend_strength(prices, period=20):
+    """
+    Calculates the normalized slope of a linear regression line as a proxy for trend strength.
+    A positive value indicates an uptrend, negative a downtrend. Magnitude indicates strength.
+    """
+    if len(prices) < period:
+        return None
+    y = np.array(prices[-period:])
+    x = np.arange(len(y))
+    slope, _ = np.polyfit(x, y, 1)
+    # Normalize slope by the mean price to make it comparable across different price levels
+    normalized_slope = slope / np.mean(y)
+    return normalized_slope
+
 def decide(current_price, price_history, news_context):
     """
     SELF-IMPROVED STRATEGY V3:
-    This version refines the highly successful V2 with three key architectural upgrades:
-    1.  Volatility-Adjusted Stop-Loss: Replaces the fixed 7% stop-loss with a
-        dynamic Chandelier Exit (3x ATR below a 20-day high). This adapts risk
-        management to current market volatility, tightening stops in calm markets
-        and loosening them during volatile periods to avoid premature exits.
-    2.  Precision Pullback Entry: The "Normal Market" BUY signal is re-engineered.
-        Instead of a lagging MACD crossover, it now identifies pullbacks within a
-        confirmed uptrend, triggering when RSI crosses above 50 while the price is
-        above the 50-day SMA. This aims for better entry timing and reduced whipsaw.
-    3.  Robust Sentiment Clamping: The sentiment score is now clamped to a range
-        of [-10, 10] to prevent single, high-impact (but potentially misleading)
-        keywords from dominating the decision-making process.
+    This version enhances the successful V2 strategy with superior risk management and
+    trade filtering to reduce whipsaws and preserve capital.
+    1.  Trend Strength Filter: Introduces a linear regression slope calculation to
+        quantify trend strength. BUY signals are now only triggered in markets with
+        demonstrably strong upward momentum, avoiding costly entries in choppy,
+        sideways markets.
+    2.  Dynamic ATR Stop-Loss: The fixed percentage stop-loss is replaced with a
+        dynamic Chandelier Exit (Highest High - N * ATR). This adapts the stop-loss
+        level to current market volatility, tightening it in calm markets and
+        loosening it in volatile ones for more intelligent risk management.
+    3.  Expanded Sentiment Dictionary: Keywords are updated to capture more
+        contemporary market drivers like "supply chain disruption" and "earnings surprise".
     """
     # --- 1. Sentiment Analysis ---
     context_lower = news_context.lower()
     sentiment_keywords = {
-        "fed pivot": 3.0, "rate cut": 2.5, "dovish surprise": 3.0, "soft landing": 2.5,
+        "fed pivot": 3.0, "rate cut": 2.5, "quantitative easing": 2.5, "soft landing": 2.5,
         "cooling inflation": 2.5, "cpi miss": 2.5, "ai boom": 2.5, "stimulus": 2.0,
         "dovish": 2.0, "record high": 2.0, "bullish": 2.0, "strong earnings": 2.0,
-        "beat estimates": 1.5, "recovery": 1.5, "upgrade": 1.5, "de-escalation": 2.0,
-        "capitulation": 3.0, "panic selling": 3.0, "extreme fear": 2.0, "short squeeze": 2.0,
+        "earnings surprise": 2.5, "beat estimates": 1.5, "recovery": 1.5, "upgrade": 1.5,
+        "de-escalation": 2.0, "short squeeze": 3.5, "capitulation": 3.0,
+        "panic selling": 2.5, "extreme fear": 2.0,
         "strong jobs report": 0.5, # Ambiguous
         "recession": -3.0, "crisis": -3.0, "stagflation": -3.0, "hot inflation": -3.0,
         "war": -3.0, "yield curve inversion": -3.5, "quantitative tightening": -2.5,
         "black swan": -4.0, "systemic risk": -4.0, "contagion": -3.5, "credit crunch": -3.5,
-        "liquidity crisis": -3.5, "hawkish surprise": -3.0, "rate hike": -2.5,
-        "bankruptcy": -2.5, "hard landing": -2.5, "geopolitical risk": -2.5,
-        "cpi beat": -2.5, "vix spike": -2.5, "hawkish": -2.0, "bearish": -2.0,
-        "sell-off": -2.0, "weak earnings": -2.0, "market turmoil": -2.0, "bubble": -2.0,
-        "uncertainty": -1.5, "market breadth weakening": -2.0,
+        "supply chain disruption": -2.5, "rate hike": -2.5, "bankruptcy": -2.5,
+        "hard landing": -2.5, "geopolitical tensions": -2.5, "cpi beat": -2.5,
+        "vix spike": -2.5, "hawkish": -2.0, "bearish": -2.0, "sell-off": -2.0,
+        "weak earnings": -2.0, "market turmoil": -2.0, "bubble": -2.0, "uncertainty": -1.5,
         "euphoria": -2.5, "mania": -3.0, "irrational exuberance": -3.0, "extreme greed": -2.5,
     }
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent"]
@@ -137,9 +132,6 @@ def decide(current_price, price_history, news_context):
             pre_context = context_lower[max(0, match.start() - 30):match.start()]
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
             net_sentiment_score += -weight if is_negated else weight
-    
-    # Clamp sentiment score to prevent extreme single keywords from dominating
-    net_sentiment_score = np.clip(net_sentiment_score, -10.0, 10.0)
 
     # --- 2. Technical Indicators & State Calculation ---
     all_prices = price_history + [current_price]
@@ -148,40 +140,41 @@ def decide(current_price, price_history, news_context):
     SMA_TREND_LONG = 100
     SMA_TREND_MEDIUM = 50
     RSI_PERIOD = 14
-    ATR_STOP_LOSS = 14
-    ATR_VOL_SHORT = 10
-    ATR_VOL_LONG = 50
+    ATR_SHORT = 10
+    ATR_LONG = 50
+    ATR_STOP_PERIOD = 14
     ROC_CRASH_PERIOD = 20
-    STOP_LOSS_LOOKBACK = 20
+    STOP_LOSS_LOOKBACK = 22 # Corresponds to Chandelier Exit period
+    TREND_STRENGTH_PERIOD = 20
+    ATR_STOP_MULTIPLIER = 2.5 # Chandelier Exit multiplier
 
-    required_history_length = max(SMA_TREND_LONG + 1, ATR_VOL_LONG + 1, ROC_CRASH_PERIOD + 1, 50)
+    required_history_length = max(SMA_TREND_LONG + 1, ATR_LONG + 1, ROC_CRASH_PERIOD + 1, 50)
     if len(all_prices) < required_history_length:
         return "HOLD"
 
     # Calculate core indicators
     sma_100 = calculate_sma(all_prices, SMA_TREND_LONG)
     sma_50 = calculate_sma(all_prices, SMA_TREND_MEDIUM)
-    rsi_series = calculate_rsi_series(all_prices, RSI_PERIOD)
+    rsi = calculate_rsi(all_prices, RSI_PERIOD)
     _, _, macd_hist_series = calculate_macd_series(all_prices)
-    atr_for_stop = calculate_atr(all_prices, ATR_STOP_LOSS)
-    short_vol_atr = calculate_atr(all_prices, ATR_VOL_SHORT)
-    long_vol_atr = calculate_atr(all_prices, ATR_VOL_LONG)
+    short_atr = calculate_atr(all_prices, ATR_SHORT)
+    long_atr = calculate_atr(all_prices, ATR_LONG)
+    atr_for_stop = calculate_atr(all_prices, ATR_STOP_PERIOD)
     roc_20 = calculate_roc(all_prices, ROC_CRASH_PERIOD)
-    donchian_high_20 = np.max(all_prices[-STOP_LOSS_LOOKBACK:]) if len(all_prices) >= STOP_LOSS_LOOKBACK else None
+    trend_strength = calculate_trend_strength(all_prices, TREND_STRENGTH_PERIOD)
+    donchian_high_22 = np.max(all_prices[-STOP_LOSS_LOOKBACK:]) if len(all_prices) >= STOP_LOSS_LOOKBACK else None
 
     # Null check for all indicators
-    if any(v is None for v in [sma_100, sma_50, atr_for_stop, short_vol_atr, long_vol_atr, roc_20, donchian_high_20]) or macd_hist_series is None or len(macd_hist_series) < 2 or len(rsi_series) < 2:
+    if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_22, atr_for_stop, trend_strength]) or macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
 
-    rsi = rsi_series[-1]
-    prev_rsi = rsi_series[-2]
     macd_histogram = macd_hist_series[-1]
     prev_macd_histogram = macd_hist_series[-2]
     macd_hist_delta = macd_histogram - prev_macd_histogram
 
     # --- 3. Regime Detection ---
     is_long_term_downtrend = current_price < sma_100
-    is_high_volatility = short_vol_atr > (long_vol_atr * 1.75)
+    is_high_volatility = short_atr > (long_atr * 1.75)
     is_crash_velocity = roc_20 < -15.0
     is_crisis_regime = (is_long_term_downtrend and is_high_volatility) or is_crash_velocity
 
@@ -204,9 +197,9 @@ def decide(current_price, price_history, news_context):
     # REGIME 3: NORMAL MARKET CONDITIONS
 
     # --- SELL LOGIC (Risk Management First) ---
-    # Priority 1: Dynamic, Volatility-Adjusted Stop-Loss (Chandelier Exit)
-    chandelier_exit = donchian_high_20 - (atr_for_stop * 3.0)
-    if current_price < chandelier_exit:
+    # Priority 1: Dynamic ATR Stop-Loss (Chandelier Exit).
+    stop_loss_price = donchian_high_22 - (ATR_STOP_MULTIPLIER * atr_for_stop)
+    if current_price < stop_loss_price:
         return "SELL"
 
     # Priority 2: Standard trend breakdown signal.
@@ -224,13 +217,12 @@ def decide(current_price, price_history, news_context):
 
     # --- BUY LOGIC ---
     is_primary_uptrend = current_price > sma_50
-    is_momentum_positive = macd_histogram > 0
-    is_pullback_entry = rsi > 50 and prev_rsi <= 50 # RSI crosses 50, confirming renewed strength
+    is_momentum_confirming_up = macd_histogram > 0 and prev_macd_histogram <= 0
     is_not_overbought = rsi < 78
     is_sentiment_permissive_for_buy = net_sentiment_score > -3.0
-    is_sufficient_volatility = short_vol_atr > (long_vol_atr * 0.6)
+    is_strong_uptrend = trend_strength > 0.004 # Normalized slope must be positive and strong
 
-    if is_primary_uptrend and is_momentum_positive and is_pullback_entry and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility:
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_strong_uptrend:
         return "BUY"
 
     # Default action is to hold the current position.
