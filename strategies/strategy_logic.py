@@ -1,12 +1,8 @@
 import numpy as np
 import re
-import math
 import pandas as pd
 
-# --- Helper Functions for Technical Indicators ---
-
 def calculate_ema_series(data, period):
-    """Calculates a full series of Exponential Moving Averages."""
     if len(data) < period:
         return np.array([])
     data_arr = np.array(data, dtype=float)
@@ -22,69 +18,50 @@ def calculate_ema_series(data, period):
         return ema_values
 
 def calculate_macd_series(prices, short_period=12, long_period=26, signal_period=9):
-    """Calculates the MACD line, signal line, and histogram series."""
     if len(prices) < long_period: 
         return None, None, None
-    
     short_ema_series = calculate_ema_series(prices, short_period)
     long_ema_series = calculate_ema_series(prices, long_period)
-    
     if len(short_ema_series) == 0 or len(long_ema_series) == 0:
         return None, None, None
-
     macd_line = short_ema_series[len(short_ema_series)-len(long_ema_series):] - long_ema_series
-    
     if len(macd_line) < signal_period: 
         return macd_line, None, None
-        
     signal_line = calculate_ema_series(macd_line, signal_period)
-    
     if len(signal_line) == 0:
         return macd_line, None, None
-
     histogram = macd_line[len(macd_line)-len(signal_line):] - signal_line
-    
     return macd_line, signal_line, histogram
 
 def calculate_rsi(prices, period=14):
-    """Calculates the Relative Strength Index (RSI) using Wilder's smoothing method."""
     if len(prices) < period + 1:
         return None
     prices_arr = np.array(prices, dtype=float)
     deltas = np.diff(prices_arr)
-    
     seed_gains = deltas[:period][deltas[:period] >= 0].sum()
     seed_losses = -deltas[:period][deltas[:period] < 0].sum()
-    
     avg_gain = seed_gains / period
     avg_loss = seed_losses / period
-    
     for i in range(period, len(deltas)):
         delta = deltas[i]
         gain = delta if delta >= 0 else 0.0
         loss = -delta if delta < 0 else 0.0
-        
         avg_gain = (avg_gain * (period - 1) + gain) / period
         avg_loss = (avg_loss * (period - 1) + loss) / period
-        
     if avg_loss == 0:
-        return 100.0 # No losses, RSI is 100
-    
+        return 100.0
     rs = avg_gain / avg_loss
     return 100.0 - (100.0 / (1.0 + rs))
 
 def calculate_atr(prices, period=14):
-    """Calculates Average True Range (ATR) using close-to-close volatility."""
     if len(prices) < period + 1:
         return None
     prices_arr = np.array(prices, dtype=float)
     price_ranges = np.abs(np.diff(prices_arr)) 
-    
     atr_series = calculate_ema_series(price_ranges, period)
     return atr_series[-1] if len(atr_series) > 0 else None
 
 def calculate_roc(prices, period=20):
-    """Calculates the Rate of Change (ROC) over a given period."""
     if len(prices) < period + 1:
         return None
     if prices[-1 - period] == 0: 
@@ -92,63 +69,22 @@ def calculate_roc(prices, period=20):
     return ((prices[-1] - prices[-1 - period]) / prices[-1 - period]) * 100
 
 def calculate_bollinger_bands(prices, period=20, std_dev=2):
-    """Calculates Bollinger Bands."""
     if len(prices) < period:
         return None, None
-    sma = calculate_sma(prices, period)
+    sma = np.mean(prices[-period:])
     std = np.std(prices[-period:])
     upper_band = sma + std_dev * std
     lower_band = sma - std_dev * std
     return upper_band, lower_band
 
 def calculate_stochastic_oscillator(prices, period=14):
-    """Calculates the Stochastic Oscillator."""
     if len(prices) < period:
         return None
     lowest_low = np.min(prices[-period:])
     highest_high = np.max(prices[-period:])
     return ((prices[-1] - lowest_low) / (highest_high - lowest_low)) * 100
 
-def calculate_force_index(prices, volume):
-    """Calculates the Force Index (FI)."""
-    if len(prices) < 2 or len(volume) < 2:
-        return None
-    return np.sum(np.diff(prices) * np.diff(volume)) / len(volume)
-
-def calculate_sma(prices, period):
-    """Calculates the Simple Moving Average (SMA) for the latest price."""
-    if len(prices) < period:
-        return None
-    return np.mean(prices[-period:])
-
-def calculate_ema(prices, period):
-    """Calculates the Exponential Moving Average (EMA) for the latest price."""
-    if len(prices) < period:
-        return None
-    return calculate_ema_series(prices, period)[-1]
-
-def calculate_keltner_channel(prices, period=20):
-    """Calculates the Keltner Channel."""
-    if len(prices) < period:
-        return None, None
-    sma = calculate_sma(prices, period)
-    atr = calculate_atr(prices, period)
-    upper_band = sma + (atr * 2)
-    lower_band = sma - (atr * 2)
-    return upper_band, lower_band
-
-def calculate_donchian_channel(prices, period=20):
-    """Calculates the Donchian Channel."""
-    if len(prices) < period:
-        return None, None
-    donchian_high = np.max(prices[-period:])
-    donchian_low = np.min(prices[-period:])
-    upper_band = donchian_high
-    lower_band = donchian_low
-    return upper_band, lower_band
-
 def calculate_sentiment_score(news_context):
-    """Calculates the sentiment score based on news context."""
     context_lower = news_context.lower()
     sentiment_keywords = {
         "fed pivot": 3.0, "rate cut": 2.5, "quantitative easing": 2.5, "soft landing": 2.5,
@@ -174,14 +110,11 @@ def calculate_sentiment_score(news_context):
             pre_context = context_lower[max(0, match.start() - 30):match.start()]
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
             net_sentiment_score += -weight if is_negated else weight
-
-    # Robust sentiment analysis with phrase scoring and negation filtering
     phrases = ["fed pivot", "rate cut", "quantitative easing", "soft landing", "cooling inflation"]
     for phrase in phrases:
         pattern = r'\b' + re.escape(phrase) + r'\b'
         for match in re.finditer(pattern, context_lower):
             net_sentiment_score += 2.5
-
     return net_sentiment_score
 
 def dynamic_scaling(all_prices):
@@ -193,75 +126,32 @@ def dynamic_scaling(all_prices):
     roc_crash_period = 20
     stop_loss_lookback = 30 
     fi_period = 20
-
     required_history_length = max(sma_trend_long + 1, atr_long + 1, roc_crash_period + 1, rsi_period + 1, 
                                   26 + 9 + 1, stop_loss_lookback + 1, fi_period + 1) 
     return required_history_length
-
-def calculate_ema_trend(prices, period=50):
-    """Calculates the Exponential Moving Average (EMA) trend."""
-    if len(prices) < period:
-        return None
-    return calculate_ema_series(prices, period)[-1]
-
-def calculate_ichimoku_cloud(prices, period=26):
-    """Calculates the Ichimoku Cloud."""
-    if len(prices) < period:
-        return None, None, None, None, None
-    tenkan_sen = calculate_ema(prices, 9)
-    kijun_sen = calculate_ema(prices, 26)
-    senkou_span_a = (tenkan_sen + kijun_sen) / 2
-    senkou_span_b = calculate_ema(prices, 52)
-    chikou_span = prices[-26:]
-    return tenkan_sen, kijun_sen, senkou_span_a, senkou_span_b, chikou_span
-
-def calculate_macd_trend(prices, period=26):
-    """Calculates the MACD trend."""
-    if len(prices) < period:
-        return None
-    macd_line, signal_line, macd_hist_series = calculate_macd_series(prices, 12, 26, 9)
-    return macd_line[-1]
-
-def calculate_ema_50(prices):
-    """Calculates the Exponential Moving Average (EMA) for the latest price."""
-    if len(prices) < 50:
-        return None
-    return calculate_ema_series(prices, 50)[-1]
-
-def calculate_ema_200(prices):
-    """Calculates the Exponential Moving Average (EMA) for the latest price."""
-    if len(prices) < 200:
-        return None
-    return calculate_ema_series(prices, 200)[-1]
 
 def decide(current_price, price_history, news_context):
     context_lower = news_context.lower()
     sentiment_score = calculate_sentiment_score(news_context)
     all_prices = price_history + [current_price]
-    all_volumes = [0.0] * len(price_history) + [0.0]  # Replace with actual volume data
-
     required_history_length = dynamic_scaling(all_prices)
     if len(all_prices) < required_history_length:
         return "HOLD"
 
-    sma_100 = calculate_sma(all_prices, max(100, len(all_prices) // 2))
-    sma_50 = calculate_sma(all_prices, max(50, len(all_prices) // 4))
+    sma_100 = np.mean(all_prices[-max(100, len(all_prices) // 2):])
+    sma_50 = np.mean(all_prices[-max(50, len(all_prices) // 4):])
     rsi = calculate_rsi(all_prices, 14)
-    ema_50 = calculate_ema_50(all_prices)
-    ema_200 = calculate_ema_200(all_prices)
-    macd_trend = calculate_macd_trend(all_prices)
+    ema_50 = calculate_ema_series(all_prices, 50)[-1] if len(all_prices) >= 50 else None
+    ema_200 = calculate_ema_series(all_prices, 200)[-1] if len(all_prices) >= 200 else None
     macd_line, signal_line, macd_hist_series = calculate_macd_series(all_prices)
     short_atr = calculate_atr(all_prices, 10)
     long_atr = calculate_atr(all_prices, 50)
     roc_20 = calculate_roc(all_prices, 20)
-    donchian_high_30, donchian_low_30 = calculate_donchian_channel(all_prices)
+    donchian_high_30, donchian_low_30 = np.max(all_prices[-30:]), np.min(all_prices[-30:])
     upper_band, lower_band = calculate_bollinger_bands(all_prices)
     stochastic_oscillator = calculate_stochastic_oscillator(all_prices)
-    fi = calculate_force_index(all_prices, all_volumes)
-    keltner_upper_band, keltner_lower_band = calculate_keltner_channel(all_prices)
-    tenkan_sen, kijun_sen, senkou_span_a, senkou_span_b, chikou_span = calculate_ichimoku_cloud(all_prices)
 
-    if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, upper_band, lower_band, stochastic_oscillator, fi]) or \
+    if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, upper_band, lower_band, stochastic_oscillator]) or \
        macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
 
@@ -285,13 +175,10 @@ def decide(current_price, price_history, news_context):
 
     if is_crisis_regime:
         is_recovering_from_oversold = rsi > 35 and macd_hist_delta > 0 and stochastic_oscillator > 80
-        
         if is_recovering_from_oversold and sentiment_score > -1.0: 
             return "BUY"
-        
         if macd_histogram < 0 or current_price < sma_50:
             return "SELL"
-        
         return "HOLD"
 
     base_stop_loss_factor = 0.88 
@@ -322,9 +209,8 @@ def decide(current_price, price_history, news_context):
     is_sentiment_permissive_for_buy = sentiment_score > -3.0
     is_sufficient_volatility = short_atr > (long_atr * 0.6) 
     is_price_in_bollinger_band = current_price > lower_band and current_price < upper_band
-    is_price_in_keltner_channel = current_price > keltner_lower_band and current_price < keltner_upper_band
 
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_bollinger_band and is_price_in_keltner_channel and stochastic_oscillator > 20:
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_bollinger_band and stochastic_oscillator > 20:
         return "BUY"
 
     return "HOLD"
