@@ -12,14 +12,11 @@ def calculate_ema_series(data, period):
     try:
         import pandas as pd
         # Using pandas is preferred for accuracy and standard implementation
-        # Ensure data is a Series for ewm to work correctly
         return pd.Series(data_arr).ewm(span=period, adjust=False).mean().to_numpy()[period-1:]
     except ImportError:
         # Fallback pure-python EMA calculation
-        if len(data_arr) < period:
-            return np.array([])
         ema_values = np.zeros(len(data_arr) - period + 1, dtype=float)
-        # Initial SMA for the first EMA point
+        # Initialize with SMA for the first 'period' values
         ema_values[0] = np.mean(data_arr[:period])
         multiplier = 2 / (period + 1)
         for i in range(1, len(ema_values)):
@@ -39,57 +36,51 @@ def calculate_rsi(prices, period=14):
     prices_arr = np.array(prices, dtype=float)
     deltas = np.diff(prices_arr)
     
-    # Handle cases where deltas might be too short for initial period
-    if len(deltas) < period:
-        return None
-
+    # Initial average gain/loss calculation (SMA-like for the first 'period' deltas)
     seed_gains = deltas[:period][deltas[:period] >= 0].sum()
     seed_losses = -deltas[:period][deltas[:period] < 0].sum()
     
     avg_gain = seed_gains / period
     avg_loss = seed_losses / period
     
-    # If there's no history beyond the seed period, calculate RSI based on seed
-    if len(deltas) == period:
-        if avg_loss == 0:
-            return 100.0
-        rs = avg_gain / avg_loss
-        return 100.0 - (100.0 / (1.0 + rs))
-
+    # Wilder's smoothing for subsequent periods
     for i in range(period, len(deltas)):
         delta = deltas[i]
         gain = delta if delta >= 0 else 0.0
         loss = -delta if delta < 0 else 0.0
+        
         avg_gain = (avg_gain * (period - 1) + gain) / period
         avg_loss = (avg_loss * (period - 1) + loss) / period
-    
+        
     if avg_loss == 0:
-        return 100.0
+        return 100.0 if avg_gain > 0 else 50.0 # Handle division by zero, 50 if no gains either
     rs = avg_gain / avg_loss
     return 100.0 - (100.0 / (1.0 + rs))
 
 def calculate_macd_series(prices, short_period=12, long_period=26, signal_period=9):
     """Calculates the MACD line, signal line, and histogram series."""
-    if len(prices) < long_period + signal_period - 1: # Ensure enough data for all EMAs
+    if len(prices) < long_period:
         return None, None, None
     
     short_ema_series = calculate_ema_series(prices, short_period)
     long_ema_series = calculate_ema_series(prices, long_period)
-
-    # Align the series for subtraction
+    
+    # Ensure EMAs are aligned for MACD calculation
+    # long_ema_series will be shorter or equal to short_ema_series if prices length is sufficient
     if len(short_ema_series) < len(long_ema_series):
-        return None, None, None # Should not happen if long_period > short_period
+        return None, None, None # Should not happen if long_period is indeed longer
     
     macd_line = short_ema_series[len(short_ema_series)-len(long_ema_series):] - long_ema_series
     
     if len(macd_line) < signal_period:
         return macd_line, None, None
-    
+        
     signal_line = calculate_ema_series(macd_line, signal_period)
     
-    if len(signal_line) == 0: # Handle case where signal_line could not be calculated
-        return macd_line, None, None
-
+    # Ensure MACD line and signal line are aligned for histogram calculation
+    if len(macd_line) < len(signal_line):
+        return macd_line, signal_line, None # Should not happen
+        
     histogram = macd_line[len(macd_line)-len(signal_line):] - signal_line
     return macd_line, signal_line, histogram
 
@@ -100,45 +91,41 @@ def calculate_atr(prices, period=14):
     
     true_ranges = []
     for i in range(1, len(prices)):
-        high_low = abs(prices[i] - prices[i-1]) # Using close-to-close as proxy for high-low
-        high_prev_close = abs(prices[i] - prices[i-1]) # Using close-to-close as proxy for high-prev_close
-        low_prev_close = abs(prices[i-1] - prices[i]) # Using close-to-close as proxy for low-prev_close
-        true_ranges.append(max(high_low, high_prev_close, low_prev_close)) # Max of these three
+        high_low = abs(prices[i] - prices[i-1]) # Using close-to-close for simplicity as OHLC not available
+        true_ranges.append(high_low)
     
-    # In a real scenario, we'd need actual High, Low, Close.
-    # Given only 'prices' (closing prices), we approximate True Range as abs(current_close - previous_close).
-    # This is a simplification, but consistent with the input data.
-    price_ranges = np.abs(np.diff(np.array(prices, dtype=float)))
-    
-    if len(price_ranges) < period:
+    if len(true_ranges) < period:
         return None
 
-    atr_series = calculate_ema_series(price_ranges, period)
+    atr_series = calculate_ema_series(true_ranges, period)
     return atr_series[-1] if len(atr_series) > 0 else None
 
 def calculate_roc(prices, period=20):
     """Calculates the Rate of Change (ROC) over a given period."""
     if len(prices) < period + 1:
         return None
-    # Ensure the denominator is not zero to avoid division by zero error
-    if prices[-1 - period] == 0:
-        return None
+    # ROC = ((Current Price - Price 'period' periods ago) / Price 'period' periods ago) * 100
     return ((prices[-1] - prices[-1 - period]) / prices[-1 - period]) * 100
 
 def decide(current_price, price_history, news_context):
     """
     SELF-IMPROVED STRATEGY V3:
-    This version refines the parent strategy by focusing on robust risk management
-    and enhanced regime adaptation, particularly during stress periods.
-    1.  **ATR-based Trailing Stop:** Replaces the fixed percentage stop-loss with a
-        dynamic stop based on Average True Range (ATR). This allows the stop to
-        adapt to current market volatility, tightening in calm markets and
-        widening in volatile ones, improving capital preservation.
-    2.  **Reinforced Crisis Aversion:** Strengthens the defensive posture during
-        general crisis regimes, prioritizing being in cash unless a high-conviction
-        contrarian capitulation signal is present.
-    3.  **Refined Sentiment Keywords:** Further updates to sentiment keywords to
-        capture more nuanced market conditions and potential turning points.
+    This version refines the previous strategy by focusing on increased trade frequency
+    in healthy markets and enhanced risk management during stress regimes.
+
+    Key enhancements:
+    1.  Dynamic ATR-based Trailing Stop-Loss: Replaces the fixed percentage stop-loss
+        with a volatility-adaptive one, improving capital preservation during varied
+        market conditions, especially stress regimes.
+    2.  More Sensitive Capitulation Buy: The "buy the dip" logic now triggers earlier
+        by detecting a deceleration in negative MACD histogram momentum, aiming to
+        catch bottoms more effectively.
+    3.  Earlier Trend Breakdown Sell: Introduces a shorter-term SMA (20-day) to provide
+        quicker exit signals when an uptrend shows signs of weakening, reducing potential
+        drawdowns.
+    4.  Slightly Relaxed Buy Volatility Filter: The `is_sufficient_volatility` condition
+        for normal market buys is slightly loosened to allow for more entry opportunities
+        in moderately volatile, trending markets, addressing low trade frequency.
     """
     # --- 1. Sentiment Analysis ---
     context_lower = news_context.lower()
@@ -155,16 +142,15 @@ def decide(current_price, price_history, news_context):
         "rate hike": -2.5, "bankruptcy": -2.5, "hard landing": -2.5, "geopolitical risk": -2.5,
         "cpi beat": -2.5, "vix spike": -2.5, "hawkish": -2.0, "bearish": -2.0,
         "sell-off": -2.0, "weak earnings": -2.0, "market turmoil": -2.0, "bubble": -2.0,
-        "uncertainty": -1.5, "slowdown": -1.5, "inflationary pressure": -2.0,
+        "uncertainty": -1.5,
         "euphoria": -2.5, "mania": -3.0, "irrational exuberance": -3.0, "extreme greed": -2.5,
     }
-    negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent", "decline in", "ease"]
+    negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent"]
     net_sentiment_score = 0.0
     for keyword, weight in sentiment_keywords.items():
         pattern = r'\b' + re.escape(keyword) + r'\b'
         for match in re.finditer(pattern, context_lower):
-            # Check a broader context for negation
-            pre_context = context_lower[max(0, match.start() - 50):match.start()]
+            pre_context = context_lower[max(0, match.start() - 30):match.start()]
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
             net_sentiment_score += -weight if is_negated else weight
 
@@ -174,32 +160,33 @@ def decide(current_price, price_history, news_context):
     # Indicator Periods
     SMA_TREND_LONG = 100
     SMA_TREND_MEDIUM = 50
+    SMA_TREND_SHORT = 20 # New shorter SMA for quicker trend breakdown detection
     RSI_PERIOD = 14
-    ATR_PERIOD = 14 # Using one ATR period for consistency
+    ATR_SHORT_PERIOD = 10
+    ATR_LONG_PERIOD = 50
     ROC_CRASH_PERIOD = 20
-    STOP_LOSS_LOOKBACK = 20 # For Donchian High reference
+    STOP_LOSS_LOOKBACK = 20 # For Donchian High calculation
+    STOP_LOSS_ATR_MULTIPLIER = 3.0 # Multiplier for ATR-based trailing stop
 
-    # ATR Stop Loss Multiplier - tuned for volatility adaptation
-    ATR_STOP_MULTIPLIER = 2.75 # A common value is 2-3x ATR
-
-    # Ensure enough history for all indicators
-    required_history_length = max(SMA_TREND_LONG, RSI_PERIOD + 1, ATR_PERIOD + 1, ROC_CRASH_PERIOD + 1, STOP_LOSS_LOOKBACK, 26 + 9 -1) # MACD needs 26+9-1 days
+    required_history_length = max(SMA_TREND_LONG + 1, ATR_LONG_PERIOD + 1, ROC_CRASH_PERIOD + 1, SMA_TREND_SHORT + 1, 50)
     if len(all_prices) < required_history_length:
         return "HOLD"
 
     # Calculate core indicators
     sma_100 = calculate_sma(all_prices, SMA_TREND_LONG)
     sma_50 = calculate_sma(all_prices, SMA_TREND_MEDIUM)
+    sma_20 = calculate_sma(all_prices, SMA_TREND_SHORT) # Calculate new SMA
     rsi = calculate_rsi(all_prices, RSI_PERIOD)
-    macd_line, signal_line, macd_hist_series = calculate_macd_series(all_prices)
-    atr = calculate_atr(all_prices, ATR_PERIOD)
+    _, _, macd_hist_series = calculate_macd_series(all_prices)
+    short_atr = calculate_atr(all_prices, ATR_SHORT_PERIOD)
+    long_atr = calculate_atr(all_prices, ATR_LONG_PERIOD)
     roc_20 = calculate_roc(all_prices, ROC_CRASH_PERIOD)
     
-    # Donchian High for trailing stop reference
-    donchian_high_20 = np.max(all_prices[-STOP_LOSS_LOOKBACK:]) if len(all_prices) >= STOP_LOSS_LOOKBACK else None
+    # Donchian High for stop-loss reference (using only historical prices to avoid look-ahead)
+    donchian_high_20 = np.max(price_history[-STOP_LOSS_LOOKBACK:]) if len(price_history) >= STOP_LOSS_LOOKBACK else None
 
-    # Null check for all critical indicators
-    if any(v is None for v in [sma_100, sma_50, rsi, atr, roc_20, donchian_high_20]) or macd_hist_series is None or len(macd_hist_series) < 2:
+    # Null check for all indicators
+    if any(v is None for v in [sma_100, sma_50, sma_20, rsi, short_atr, long_atr, roc_20, donchian_high_20]) or macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
 
     macd_histogram = macd_hist_series[-1]
@@ -209,62 +196,62 @@ def decide(current_price, price_history, news_context):
     # --- 3. Regime Detection ---
     # Crisis Regime: General high-risk environment
     is_long_term_downtrend = current_price < sma_100
-    # High volatility check: ATR relative to a longer-term average (if available) or absolute threshold
-    # For simplicity with one ATR, we'll use ROC as a proxy for 'crash velocity'
-    is_high_volatility_proxy = atr > np.mean(all_prices[-ATR_PERIOD:]) * 0.015 # ATR is > 1.5% of average price
-    is_crash_velocity = roc_20 < -12.0 # Slightly less extreme threshold for general crisis
-    is_crisis_regime = (is_long_term_downtrend and is_high_volatility_proxy) or is_crash_velocity or net_sentiment_score < -3.0
+    is_high_volatility = short_atr > (long_atr * 1.75)
+    is_crash_velocity = roc_20 < -15.0
+    is_crisis_regime = (is_long_term_downtrend and is_high_volatility) or is_crash_velocity
 
     # Capitulation Regime: An extreme subset of crisis, signaling a potential bottom
-    is_deeply_oversold = rsi < 20 # More extreme oversold
-    is_extreme_crash_velocity = roc_20 < -20.0 # More extreme crash
-    is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold and net_sentiment_score < -2.0
+    is_deeply_oversold = rsi < 25
+    is_extreme_crash_velocity = roc_20 < -18.0
+    is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold
 
     # --- 4. Decision Logic (Hierarchical) ---
 
-    # Priority 1: ATR-BASED TRAILING STOP (Risk Management)
-    # This is a dynamic stop-loss that adapts to volatility.
-    # If the current price drops significantly below a recent high, adjusted by ATR.
-    atr_stop_level = donchian_high_20 - (atr * ATR_STOP_MULTIPLIER)
-    if current_price < atr_stop_level:
-        return "SELL"
-
-    # Priority 2: CONTRARIAN CAPITULATION (High Conviction Buy)
-    # Buy when there is blood in the streets, but only if momentum shows signs of turning.
-    if is_capitulation_candidate and macd_hist_delta > 0:
+    # REGIME 1: CONTRARIAN CAPITULATION (HIGHEST PRIORITY)
+    # Buy when there is blood in the streets, but only if momentum shows signs of turning (or decelerating negative momentum).
+    # macd_histogram < 0 and prev_macd_histogram < macd_histogram means negative momentum is shrinking (less negative)
+    if is_capitulation_candidate and (macd_hist_delta > 0 or (macd_histogram < 0 and prev_macd_histogram < macd_histogram)):
         return "BUY"
 
-    # Priority 3: CRISIS AVERSION (Defensive Stance)
+    # REGIME 2: CRISIS AVERSION
     # If in a general crisis (but not a specific capitulation buy signal), be defensive.
-    # This ensures we prioritize being in cash during uncertain times.
     if is_crisis_regime:
-        # If already in a downtrend or momentum is negative, sell. Otherwise, hold cash.
         if macd_histogram < 0 or current_price < sma_50:
             return "SELL"
         return "HOLD" # Hold cash and wait for the storm to pass.
 
-    # REGIME 4: NORMAL MARKET CONDITIONS
+    # REGIME 3: NORMAL MARKET CONDITIONS
 
-    # --- SELL LOGIC ---
-    # Standard trend breakdown signal.
-    is_primary_downtrend = current_price < sma_50
-    is_momentum_confirming_down = macd_histogram < 0 and prev_macd_histogram >= 0
-    is_sentiment_permissive_for_sell = net_sentiment_score < 2.0 # Lower threshold for selling
-    if is_primary_downtrend and is_momentum_confirming_down and is_sentiment_permissive_for_sell:
+    # --- SELL LOGIC (Risk Management First) ---
+    # Priority 1: Dynamic ATR-based Trailing Stop-Loss.
+    # Sell if current price drops significantly from a recent high, adjusted by volatility.
+    stop_loss_level = donchian_high_20 - (STOP_LOSS_ATR_MULTIPLIER * short_atr)
+    if current_price < stop_loss_level:
         return "SELL"
 
-    # Profit-taking on extreme overbought conditions with FADING momentum.
+    # Priority 2: Standard trend breakdown signal (using shorter SMA for earlier exit).
+    is_primary_downtrend = current_price < sma_50
+    is_short_term_downtrend = current_price < sma_20 # New condition
+    is_momentum_confirming_down = macd_histogram < 0 and prev_macd_histogram >= 0
+    is_sentiment_permissive_for_sell = net_sentiment_score < 3.0
+    
+    # Sell if primary trend breaks or short-term trend breaks with momentum confirmation
+    if (is_primary_downtrend or is_short_term_downtrend) and is_momentum_confirming_down and is_sentiment_permissive_for_sell:
+        return "SELL"
+
+    # Priority 3: Profit-taking on extreme overbought conditions with FADING momentum.
     is_momentum_fading = macd_hist_delta < 0
-    is_extremely_overbought = rsi > 80 # Slightly less extreme than V2's 82, to take profits earlier
+    is_extremely_overbought = rsi > 82
     if is_extremely_overbought and is_momentum_fading:
         return "SELL"
 
     # --- BUY LOGIC ---
     is_primary_uptrend = current_price > sma_50
     is_momentum_confirming_up = macd_histogram > 0 and prev_macd_histogram <= 0
-    is_not_overbought = rsi < 75 # Slightly lower threshold to avoid buying into very extended rallies
-    is_sentiment_permissive_for_buy = net_sentiment_score > -2.0 # Higher threshold for buying
-    is_sufficient_volatility = atr > (np.mean(all_prices[-ATR_PERIOD:]) * 0.005) # Avoids entering dead, sideways markets.
+    is_not_overbought = rsi < 78
+    is_sentiment_permissive_for_buy = net_sentiment_score > -3.0
+    # Slightly relaxed volatility filter to allow more entries in trending markets
+    is_sufficient_volatility = short_atr > (long_atr * 0.5) 
 
     if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility:
         return "BUY"
