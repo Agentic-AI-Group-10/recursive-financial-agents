@@ -10,16 +10,14 @@ def calculate_ema_series(data, period):
         return np.array([])
     data_arr = np.array(data, dtype=float)
     try:
-        # Use pandas if available for a robust, standard implementation
         import pandas as pd
-        return pd.Series(data_arr).ewm(span=period, adjust=False).mean().to_numpy()
+        return pd.Series(data_arr).ewm(span=period, adjust=False).mean().to_numpy()[period-1:]
     except ImportError:
-        # Fallback to a manual calculation if pandas is not installed
-        ema_values = np.zeros_like(data_arr)
-        ema_values[period-1] = np.mean(data_arr[:period])
+        ema_values = np.zeros(len(data_arr) - period + 1, dtype=float)
+        ema_values[0] = np.mean(data_arr[:period])
         multiplier = 2 / (period + 1)
-        for i in range(period, len(data_arr)):
-            ema_values[i] = (data_arr[i] - ema_values[i-1]) * multiplier + ema_values[i-1]
+        for i in range(1, len(ema_values)):
+            ema_values[i] = (data_arr[i + period - 1] - ema_values[i-1]) * multiplier + ema_values[i-1]
         return ema_values
 
 def calculate_ema(prices, period):
@@ -60,21 +58,25 @@ def calculate_macd_series(prices, short_period=12, long_period=26, signal_period
     """Calculates the MACD line, signal line, and histogram series."""
     if len(prices) < long_period:
         return None, None, None
-    
-    full_short_ema = calculate_ema_series(prices, short_period)
-    full_long_ema = calculate_ema_series(prices, long_period)
-    
-    macd_line = full_short_ema - full_long_ema
-    
+    short_ema_series = calculate_ema_series(prices, short_period)
+    long_ema_series = calculate_ema_series(prices, long_period)
+    macd_line = short_ema_series[len(short_ema_series)-len(long_ema_series):] - long_ema_series
     if len(macd_line) < signal_period:
         return macd_line, None, None
-        
     signal_line = calculate_ema_series(macd_line, signal_period)
-    histogram = macd_line - signal_line
-    
-    # Return only the valid, non-zero parts of the series
-    return macd_line[long_period-1:], signal_line[long_period+signal_period-2:], histogram[long_period+signal_period-2:]
+    histogram = macd_line[len(macd_line)-len(signal_line):] - signal_line
+    return macd_line, signal_line, histogram
 
+def calculate_bollinger_bands(prices, period=20, num_std_dev=2):
+    """Calculates the Bollinger Bands for the latest price."""
+    if len(prices) < period:
+        return None, None, None
+    prices_slice = prices[-period:]
+    middle_band = np.mean(prices_slice)
+    std_dev = np.std(prices_slice)
+    upper_band = middle_band + (std_dev * num_std_dev)
+    lower_band = middle_band - (std_dev * num_std_dev)
+    return middle_band, upper_band, lower_band
 
 def calculate_atr(prices, period=14):
     """Calculates Average True Range (ATR) using close-to-close volatility."""
@@ -82,41 +84,51 @@ def calculate_atr(prices, period=14):
         return None
     prices_arr = np.array(prices, dtype=float)
     price_ranges = np.abs(np.diff(prices_arr))
-    # Use the more robust full series calculation for ATR
     atr_series = calculate_ema_series(price_ranges, period)
     return atr_series[-1] if len(atr_series) > 0 else None
 
+def calculate_vamo(prices, period=14):
+    """
+    Calculates the Volatility-Adjusted Momentum Oscillator (VAMO).
+    This measures the N-period price change in units of N-period ATR.
+    A value of +2.0 means the price has moved up by 2x the average daily range.
+    """
+    if len(prices) < period + 1:
+        return None
+    atr = calculate_atr(prices, period)
+    if atr is None or atr == 0:
+        return 0.0
+    price_change = prices[-1] - prices[-period]
+    return price_change / atr
+
 def decide(current_price, price_history, news_context):
     """
-    A self-improved strategy based on a unified "Market Health" framework. It prioritizes
-    capital preservation in high-risk environments and uses a high-conviction "Phoenix"
-    signal for re-entry after a crisis, while employing robust trend-following in
-    normal conditions.
-
-    Parameters:
-        current_price (float): The current day's closing price for SPY.
-        price_history (list of float): List of historical closing prices up to yesterday.
-        news_context (str): Combined news headlines from the last 24 hours.
-
-    Returns:
-        str: "BUY", "SELL", or "HOLD"
+    A self-improved strategy using a unified conviction score and a robust "Phoenix"
+    re-entry signal for crash scenarios, addressing past failures in volatile markets.
     """
-    # --- 1. Sentiment Analysis (Retained from successful parent) ---
+    # --- 1. Sentiment Analysis ---
     context_lower = news_context.lower()
     sentiment_keywords = {
-        # High-impact Macro (Positive)
+        # Strong Positive (Macro)
         "fed pivot": 4.0, "quantitative easing": 3.5, "stimulus": 3.0, "rate cut": 3.0,
-        "soft landing": 2.5, "cooling inflation": 2.5, "cpi miss": 2.5, "dovish": 2.0,
-        # High-impact Macro (Negative)
-        "black swan": -5.0, "systemic risk": -4.5, "yield curve inversion": -4.0, "crisis": -4.0,
-        "recession": -3.5, "stagflation": -3.5, "hot inflation": -3.5, "war": -3.5,
-        "quantitative tightening": -3.0, "rate hike": -3.0, "credit crunch": -3.0,
-        # Contrarian (used with caution)
-        "capitulation": 2.0, "panic selling": 1.5, "extreme fear": 1.0,
-        "euphoria": -2.5, "mania": -3.0, "irrational exuberance": -3.0,
-        # Standard News
-        "strong earnings": 2.0, "bullish": 1.5, "breakthrough": 2.0, "record high": 1.5,
-        "hawkish": -2.0, "bearish": -1.5, "plunge": -2.0, "sell-off": -1.5, "uncertainty": -1.0,
+        "soft landing": 2.5, "cooling inflation": 2.5, "disinflation": 2.0,
+        # Strong Positive (Market)
+        "ai boom": 2.5, "record high": 2.0, "strong earnings": 2.0, "breakthrough": 2.0,
+        # Mild Positive
+        "dovish": 1.5, "beat estimates": 1.5, "recovery": 1.5, "upgrade": 1.0,
+        # Contrarian Bullish (Use with caution, lower weight)
+        "capitulation": 1.5, "panic selling": 1.0, "extreme fear": 1.0,
+        # Strong Negative (Macro)
+        "black swan": -4.0, "systemic risk": -4.0, "crisis": -3.5, "recession": -3.0,
+        "stagflation": -3.0, "yield curve inversion": -3.5, "hot inflation": -3.0,
+        "quantitative tightening": -3.0, "war": -3.0,
+        # Strong Negative (Market)
+        "credit crunch": -3.0, "contagion": -3.0, "vix spike": -2.5, "hard landing": -2.5,
+        # Mild Negative
+        "rate hike": -2.0, "hawkish": -2.0, "bearish": -1.5, "sell-off": -1.5,
+        "market turmoil": -1.5, "uncertainty": -1.0,
+        # Contrarian Bearish (Greed)
+        "euphoria": -2.5, "mania": -3.0, "irrational exuberance": -3.0, "extreme greed": -2.5,
     }
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent"]
     net_sentiment_score = 0.0
@@ -127,88 +139,108 @@ def decide(current_price, price_history, news_context):
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
             net_sentiment_score += -weight if is_negated else weight
 
-    # --- 2. Technical Indicators & Market Health Assessment ---
+    # --- 2. Technical Indicators & Data Preparation ---
     all_prices = price_history + [current_price]
     
     # Indicator Periods
     SHORT_EMA_PERIOD = 12
     LONG_EMA_PERIOD = 26
-    RECOVERY_SMA_PERIOD = 20  # For Phoenix signal
-    TREND_SMA_PERIOD = 100    # Core Market Health filter
+    TREND_SMA_20 = 20
+    TREND_SMA_50 = 50
     RSI_PERIOD = 14
-    ATR_SHORT_PERIOD = 10
-    ATR_LONG_PERIOD = 50
+    BB_PERIOD = 20
+    ATR_REGIME_SHORT = 10
+    ATR_REGIME_LONG = 50
+    VAMO_PERIOD = 14
 
-    required_history_length = max(TREND_SMA_PERIOD + 1, ATR_LONG_PERIOD + 1, LONG_EMA_PERIOD + 9)
+    required_history_length = max(LONG_EMA_PERIOD + 9, ATR_REGIME_LONG + 1, TREND_SMA_50 + 1)
     if len(all_prices) < required_history_length:
         return "HOLD"
 
-    # Calculate all indicators
+    # Calculate core indicators
     short_ema = calculate_ema(all_prices, SHORT_EMA_PERIOD)
     long_ema = calculate_ema(all_prices, LONG_EMA_PERIOD)
-    sma_20 = calculate_sma(all_prices, RECOVERY_SMA_PERIOD)
-    sma_100 = calculate_sma(all_prices, TREND_SMA_PERIOD)
-    sma_100_yesterday = calculate_sma(all_prices[:-1], TREND_SMA_PERIOD)
-    
+    sma_20 = calculate_sma(all_prices, TREND_SMA_20)
+    sma_50 = calculate_sma(all_prices, TREND_SMA_50)
     rsi = calculate_rsi(all_prices, RSI_PERIOD)
-    
-    short_atr = calculate_atr(all_prices, ATR_SHORT_PERIOD)
-    long_atr = calculate_atr(all_prices, ATR_LONG_PERIOD)
-    
+    _, upper_band, lower_band = calculate_bollinger_bands(all_prices, BB_PERIOD)
     _, _, macd_hist_series = calculate_macd_series(all_prices)
+    short_atr = calculate_atr(all_prices, ATR_REGIME_SHORT)
+    long_atr = calculate_atr(all_prices, ATR_REGIME_LONG)
+    vamo = calculate_vamo(all_prices, VAMO_PERIOD)
+    
+    # Previous day's values for crossover detection
+    prev_prices = all_prices[:-1]
+    prev_sma_20 = calculate_sma(prev_prices, TREND_SMA_20)
 
-    # Robustness check for all calculations
-    if any(v is None for v in [short_ema, long_ema, sma_20, sma_100, sma_100_yesterday, rsi, short_atr, long_atr]) or macd_hist_series is None or len(macd_hist_series) < 2:
+    if any(v is None for v in [short_ema, long_ema, sma_20, sma_50, rsi, upper_band, short_atr, long_atr, vamo, prev_sma_20]) or macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
     
-    macd_hist = macd_hist_series[-1]
-    prev_macd_hist = macd_hist_series[-2]
+    macd_histogram = macd_hist_series[-1]
+    prev_macd_histogram = macd_hist_series[-2]
 
-    # --- 3. Unified Regime Definition (Market Health) ---
-    # This is the core defensive trigger, addressing the failure to act early in a crash.
-    is_high_volatility = short_atr > (long_atr * 1.8)
-    is_long_term_trend_broken = current_price < sma_100
-    IS_RISK_OFF_ENVIRONMENT = is_long_term_trend_broken and is_high_volatility
+    # --- 3. Regime Detection ---
+    is_high_volatility = short_atr > (long_atr * 1.75)
+    is_long_term_bearish = current_price < sma_50
+    is_crash_environment = is_long_term_bearish and is_high_volatility
 
     # --- 4. Decision Logic ---
 
-    # === REGIME 1: RISK-OFF / CRASH PROTECTION ===
-    # If the market is unhealthy, the only goal is capital preservation. No buying.
-    if IS_RISK_OFF_ENVIRONMENT:
-        return "SELL" # Liquidate any holdings and stay in cash.
-
-    # === REGIME 2: PHOENIX RE-ENTRY (Post-Crash Recovery) ===
-    # This logic only runs if the market is NO LONGER in a Risk-Off state.
-    # It looks for a high-conviction signal to re-enter after a crisis.
-    was_recently_risk_off = price_history[-1] < sma_100_yesterday
-    if was_recently_risk_off:
-        # The "Phoenix Signal" requires a confluence of strong evidence for recovery.
-        is_price_recovering = current_price > sma_20
-        is_momentum_reversing = macd_hist > 0 and prev_macd_hist <= 0
-        has_macro_support = net_sentiment_score > 3.0 # High bar for stimulus/pivot news
+    # === REGIME 1: CRASH ENVIRONMENT ===
+    # Priority is capital preservation. Avoid buying unless a high-conviction "Phoenix" reversal occurs.
+    if is_crash_environment:
+        # "Phoenix" Re-entry Signal (High-conviction BUY)
+        is_reclaiming_trend = current_price > sma_20 and prev_prices[-1] < prev_sma_20
+        is_momentum_confirmed = macd_histogram > 0
+        has_macro_support = net_sentiment_score > 3.5 # Requires strong positive news (stimulus, QE, etc.)
         
-        if is_price_recovering and is_momentum_reversing and has_macro_support:
+        if is_reclaiming_trend and is_momentum_confirmed and has_macro_support:
             return "BUY"
-        else:
-            return "HOLD" # Wait for full confirmation; don't jump back in too early.
 
-    # === REGIME 3: NORMAL TREND-FOLLOWING (Risk-On Environment) ===
-    # Simplified and robust logic for healthy market conditions.
-    is_bullish_trend = short_ema > long_ema
-    is_momentum_positive = macd_hist > 0
-    is_strength_confirmed = rsi > 52 # Use RSI > 50 as a basic strength filter
+        # Default action in a crash: stay out of the market.
+        if current_price < sma_20:
+            return "SELL"
+        
+        return "HOLD"
 
-    # BUY Condition: Enter when trend, momentum, and strength align.
-    if is_bullish_trend and is_momentum_positive and is_strength_confirmed:
+    # === REGIME 2: NORMAL ENVIRONMENT ===
+    # Use a unified conviction score to make decisions.
+    buy_score = 0.0
+    sell_score = 0.0
+
+    # --- Scoring Components ---
+    # 1. Trend Score (Weight: 2.0)
+    if current_price > short_ema and short_ema > long_ema and current_price > sma_20:
+        buy_score += 2.0
+    elif current_price < short_ema and short_ema < long_ema and current_price < sma_20:
+        sell_score += 2.0
+
+    # 2. Momentum Score (Weight: 2.5)
+    if vamo > 1.25 and rsi > 52: # Strong upward momentum relative to volatility
+        buy_score += 1.5
+    if vamo < -1.25 and rsi < 48: # Strong downward momentum relative to volatility
+        sell_score += 1.5
+    if macd_histogram > 0 and macd_histogram > prev_macd_histogram: # Accelerating positive momentum
+        buy_score += 1.0
+    if macd_histogram < 0 and macd_histogram < prev_macd_histogram: # Accelerating negative momentum
+        sell_score += 1.0
+
+    # 3. Sentiment Score (Weight: Scaled)
+    buy_score += max(0, net_sentiment_score / 2.0)
+    sell_score += max(0, -net_sentiment_score / 2.0)
+
+    # 4. Overbought/Oversold Mean Reversion (Can act as entry or exit signal)
+    if rsi > 78 and current_price > upper_band:
+        sell_score += 1.5 # Profit-taking or short signal
+    if rsi < 22 and current_price < lower_band:
+        buy_score += 1.5 # Contrarian buy signal
+
+    # --- Final Decision ---
+    CONVICTION_THRESHOLD = 4.0
+    if buy_score >= CONVICTION_THRESHOLD and sell_score < (buy_score * 0.5):
         return "BUY"
-
-    # SELL Condition: Exit when the trend fails or shows signs of exhaustion.
-    # This is more tolerant than the parent's tight stop-loss, allowing trends to run.
-    is_trend_failing = short_ema < long_ema
-    is_overbought_and_fading = rsi > 78 and macd_hist < prev_macd_hist
     
-    if is_trend_failing or is_overbought_and_fading:
+    if sell_score >= CONVICTION_THRESHOLD and buy_score < (sell_score * 0.5):
         return "SELL"
 
-    # Default action is to hold the current position if no strong signal is present.
     return "HOLD"
