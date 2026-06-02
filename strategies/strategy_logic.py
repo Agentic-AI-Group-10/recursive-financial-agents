@@ -177,13 +177,7 @@ def calculate_sentiment_score(news_context):
 
     return net_sentiment_score
 
-def decide(current_price, price_history, news_context):
-    context_lower = news_context.lower()
-    sentiment_score = calculate_sentiment_score(news_context)
-    all_prices = price_history + [current_price]
-    all_volumes = [0.0] * len(price_history) + [0.0]  # Replace with actual volume data
-
-    # Dynamic scaling of indicators based on price history length
+def dynamic_scaling(all_prices):
     sma_trend_long = max(100, len(all_prices) // 2)
     sma_trend_medium = max(50, len(all_prices) // 4)
     rsi_period = 14
@@ -195,17 +189,26 @@ def decide(current_price, price_history, news_context):
 
     required_history_length = max(sma_trend_long + 1, atr_long + 1, roc_crash_period + 1, rsi_period + 1, 
                                   26 + 9 + 1, stop_loss_lookback + 1, fi_period + 1) 
+    return required_history_length
+
+def decide(current_price, price_history, news_context):
+    context_lower = news_context.lower()
+    sentiment_score = calculate_sentiment_score(news_context)
+    all_prices = price_history + [current_price]
+    all_volumes = [0.0] * len(price_history) + [0.0]  # Replace with actual volume data
+
+    required_history_length = dynamic_scaling(all_prices)
     if len(all_prices) < required_history_length:
         return "HOLD"
 
-    sma_100 = calculate_sma(all_prices, sma_trend_long)
-    sma_50 = calculate_sma(all_prices, sma_trend_medium)
-    rsi = calculate_rsi(all_prices, rsi_period)
+    sma_100 = calculate_sma(all_prices, max(100, len(all_prices) // 2))
+    sma_50 = calculate_sma(all_prices, max(50, len(all_prices) // 4))
+    rsi = calculate_rsi(all_prices, 14)
     ema_50 = calculate_ema(all_prices, 50)
     macd_line, signal_line, macd_hist_series = calculate_macd_series(all_prices)
-    short_atr = calculate_atr(all_prices, atr_short)
-    long_atr = calculate_atr(all_prices, atr_long)
-    roc_20 = calculate_roc(all_prices, roc_crash_period)
+    short_atr = calculate_atr(all_prices, 10)
+    long_atr = calculate_atr(all_prices, 50)
+    roc_20 = calculate_roc(all_prices, 20)
     donchian_high_30, donchian_low_30 = calculate_donchian_channel(all_prices)
     upper_band, lower_band = calculate_bollinger_bands(all_prices)
     stochastic_oscillator = calculate_stochastic_oscillator(all_prices)
