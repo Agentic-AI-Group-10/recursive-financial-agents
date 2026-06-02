@@ -161,6 +161,8 @@ def decide(current_price, price_history, news_context):
 
     sma_50 = np.mean(all_prices[-50:])
     sma_200 = np.mean(all_prices[-200:])
+    ema_20 = calculate_ema_series(all_prices, 20)[-1] if len(all_prices) >= 20 else None
+    ema_50 = calculate_ema_series(all_prices, 50)[-1] if len(all_prices) >= 50 else None
     rsi = calculate_rsi(all_prices, 14)
     macd_line, signal_line, macd_hist_series = calculate_macd_series(all_prices)
     short_atr = calculate_atr(all_prices, 10)
@@ -173,7 +175,7 @@ def decide(current_price, price_history, news_context):
     keltner_upper_band, keltner_lower_band = calculate_keltner_channel(all_prices)
     tenkan_sen, kijun_sen, senkou_span_a, senkou_span_b, chikou_span = calculate_ichimoku_cloud(all_prices)
 
-    if any(v is None for v in [sma_50, sma_200, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, upper_band, lower_band, stochastic_oscillator, fi]) or \
+    if any(v is None for v in [sma_50, sma_200, ema_20, ema_50, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, upper_band, lower_band, stochastic_oscillator, fi]) or \
        macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
 
@@ -232,8 +234,9 @@ def decide(current_price, price_history, news_context):
     is_sufficient_volatility = short_atr > (long_atr * 0.6)
     is_price_in_bollinger_band = current_price > lower_band and current_price < upper_band
     is_price_in_keltner_channel = current_price > keltner_lower_band and current_price < keltner_upper_band
+    is_ema_crossover = ema_20 is not None and ema_50 is not None and ema_20 > ema_50
 
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_bollinger_band and is_price_in_keltner_channel and stochastic_oscillator > 20:
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_bollinger_band and is_price_in_keltner_channel and stochastic_oscillator > 20 and is_ema_crossover:
         return "BUY"
 
     return "HOLD"
