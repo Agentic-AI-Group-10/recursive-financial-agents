@@ -100,19 +100,18 @@ def calculate_trend_consistency(prices, period=20):
         return 1.0
     return std_dev_changes / avg_abs_change
 
-def calculate_donchian_channels(prices, period=20):
-    """Calculates the Donchian Channels for the latest price."""
-    if len(prices) < period:
-        return None, None
-    prices_slice = prices[-period:]
-    upper_channel = np.max(prices_slice)
-    lower_channel = np.min(prices_slice)
-    return upper_channel, lower_channel
+def calculate_roc(prices, period=10):
+    """Calculates the Rate of Change (ROC)."""
+    if len(prices) < period + 1:
+        return None
+    return ((prices[-1] - prices[-1 - period]) / prices[-1 - period]) * 100
 
 def decide(current_price, price_history, news_context):
     """
     A self-improved, multi-regime trading strategy with a dedicated "Crash Protection"
-    mode to ensure robustness during sustained, high-volatility downturns.
+    mode to ensure robustness during sustained, high-volatility downturns. This version
+    incorporates a velocity indicator (ROC) for faster crash recovery signals and a
+    dynamic exit strategy to prevent "slow bleed" drawdowns.
 
     Parameters:
         current_price (float): The current day's closing price for SPY.
@@ -134,7 +133,7 @@ def decide(current_price, price_history, news_context):
         "strong earnings": 2.0, "disinflation": 2.0, "market rally": 2.0, "vix crush": 2.0,
         # Mild Positive
         "beat estimates": 1.5, "growth": 1.5, "recovery": 1.5, "upgrade": 1.5, "de-escalation": 2.0,
-        "easing tensions": 1.5, "consumer confidence": 1.5, "weak jobs report": 1.5, # Nuanced: good for rates
+        "easing tensions": 1.5, "consumer confidence": 1.5, "weak jobs report": 1.5,
         # Contrarian Bullish (Fear)
         "capitulation": 3.0, "panic selling": 2.5, "extreme fear": 2.0,
         # Strong Negative
@@ -147,7 +146,7 @@ def decide(current_price, price_history, news_context):
         # Mild Negative
         "hawkish": -2.0, "bearish": -2.0, "plunge": -2.0, "sell-off": -2.0, "weak earnings": -2.0,
         "market turmoil": -2.0, "bubble": -2.0, "tightening": -1.5, "miss estimates": -1.5,
-        "downgrade": -1.5, "tariff": -1.5, "uncertainty": -1.5, "strong jobs report": -1.5, # Nuanced: bad for rates
+        "downgrade": -1.5, "tariff": -1.5, "uncertainty": -1.5, "strong jobs report": -1.5,
         # Contrarian Bearish (Greed)
         "euphoria": -2.5, "mania": -3.0, "irrational exuberance": -3.0, "extreme greed": -2.5,
     }
@@ -166,13 +165,13 @@ def decide(current_price, price_history, news_context):
     # Indicator Periods
     SHORT_EMA_PERIOD = 12
     LONG_EMA_PERIOD = 26
-    LONG_TERM_SMA_PERIOD = 50 # **NEW** For long-term trend filter
+    LONG_TERM_SMA_PERIOD = 50
     RSI_PERIOD = 14
     BB_PERIOD = 20
-    DONCHIAN_PERIOD = 20
     ATR_REGIME_SHORT = 10
     ATR_REGIME_LONG = 50
     TREND_CONSISTENCY_PERIOD = 20
+    ROC_FAST_PERIOD = 5 # **NEW** For V-bottom detection
 
     required_history_length = max(LONG_EMA_PERIOD + 9, ATR_REGIME_LONG + 1, LONG_TERM_SMA_PERIOD + 1)
     if len(all_prices) < required_history_length:
@@ -181,17 +180,16 @@ def decide(current_price, price_history, news_context):
     # Calculate core indicators
     short_ema = calculate_ema(all_prices, SHORT_EMA_PERIOD)
     long_ema = calculate_ema(all_prices, LONG_EMA_PERIOD)
-    sma_50 = calculate_sma(all_prices, LONG_TERM_SMA_PERIOD) # **NEW**
+    sma_50 = calculate_sma(all_prices, LONG_TERM_SMA_PERIOD)
     rsi = calculate_rsi(all_prices, RSI_PERIOD)
-    prev_rsi = calculate_rsi(all_prices[:-1], RSI_PERIOD)
     _, upper_band, lower_band = calculate_bollinger_bands(all_prices, BB_PERIOD)
-    upper_donchian, lower_donchian = calculate_donchian_channels(all_prices, DONCHIAN_PERIOD)
     _, _, macd_hist_series = calculate_macd_series(all_prices)
     short_atr = calculate_atr(all_prices, ATR_REGIME_SHORT)
     long_atr = calculate_atr(all_prices, ATR_REGIME_LONG)
     trend_consistency = calculate_trend_consistency(all_prices, TREND_CONSISTENCY_PERIOD)
+    roc_fast = calculate_roc(all_prices, ROC_FAST_PERIOD) # **NEW**
 
-    if any(v is None for v in [short_ema, long_ema, sma_50, rsi, prev_rsi, upper_band, lower_band, upper_donchian, lower_donchian, short_atr, long_atr, trend_consistency]) or macd_hist_series is None or len(macd_hist_series) < 3:
+    if any(v is None for v in [short_ema, long_ema, sma_50, rsi, upper_band, lower_band, short_atr, long_atr, trend_consistency, roc_fast]) or macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
     
     macd_histogram = macd_hist_series[-1]
@@ -201,66 +199,57 @@ def decide(current_price, price_history, news_context):
     is_high_volatility = short_atr > (long_atr * 1.6)
     is_long_term_bearish = current_price < sma_50
     is_trending_market = trend_consistency < 1.25
-
-    # **IMPROVEMENT**: Define a specific "Crash Protection" mode.
-    # This is the most critical regime, overriding others. It's defined by a confirmed
-    # long-term downtrend combined with high volatility.
     CRASH_MODE = is_long_term_bearish and is_high_volatility
 
     # --- 4. Multi-Regime Decision Logic ---
     if CRASH_MODE:
-        # === CRASH PROTECTION MODE: Prioritize capital preservation. Avoid buying dips. ===
-        # SELL signal is sensitive to any further breakdown or failure at resistance.
-        if short_ema < long_ema and rsi < 55 and macd_histogram < 0:
+        # === CRASH PROTECTION MODE: Prioritize capital preservation & spot V-bottoms. ===
+        # SELL signal is simple: get out if the trend is clearly down.
+        if short_ema < long_ema and rsi < 50:
             return "SELL"
 
-        # BUY signal is heavily suppressed. Only consider buying on signs of a major, confirmed reversal.
-        # This prevents "catching a falling knife" during a crash.
-        is_fresh_macd_cross_up = macd_histogram > 0 and prev_macd_histogram < 0
-        if rsi < 30 and is_fresh_macd_cross_up and net_sentiment_score > 2.0:
+        # **IMPROVEMENT**: BUY signal uses ROC to detect rapid, V-shaped reversals,
+        # which lagging indicators like MACD would miss.
+        is_reversal_velocity = roc_fast > 7.0  # A 7% gain in 5 days is a strong reversal signal.
+        is_deeply_oversold = rsi < 35
+        if is_deeply_oversold and is_reversal_velocity and net_sentiment_score > 1.5:
             return "BUY"
         
-        # Default action in a crash is to HOLD cash and wait for a clear trend change.
         return "HOLD"
 
     # --- Logic for all other non-crash scenarios ---
-    if is_high_volatility:
-        # === VOLATILE UPTREND MODE: High-conviction, sentiment-driven trend-following ===
-        BULLISH_SENTIMENT_THRESHOLD = 3.5
-        BEARISH_SENTIMENT_THRESHOLD = -3.5
-        if net_sentiment_score >= BULLISH_SENTIMENT_THRESHOLD and short_ema > long_ema and macd_histogram > 0 and rsi < 80:
+    bullish_trend = short_ema > long_ema
+    bearish_trend = short_ema < long_ema
+
+    # **IMPROVEMENT**: DYNAMIC TRAILING STOP / PROFIT PROTECTION LOGIC
+    # This is a high-priority exit signal to prevent "slow bleed" drawdowns.
+    # It triggers if we are in an uptrend, but price violates the short-term EMA
+    # and momentum is clearly fading.
+    is_momentum_fading_up = macd_histogram > 0 and macd_histogram < prev_macd_histogram
+    if bullish_trend and current_price < short_ema and is_momentum_fading_up:
+        return "SELL"
+
+    if is_trending_market:
+        # Sub-Regime: Normal Trending Market
+        # Profit-taking on extreme overbought conditions
+        if bullish_trend and rsi > 78 and is_momentum_fading_up:
+            return "SELL"
+
+        # Trend-following BUY with confirmation
+        if bullish_trend and macd_histogram > 0 and rsi < 75 and net_sentiment_score > -2.0:
             return "BUY"
-        elif net_sentiment_score <= BEARISH_SENTIMENT_THRESHOLD and short_ema < long_ema and macd_histogram < 0 and rsi > 20:
+        
+        # Trend-following SELL
+        if bearish_trend and macd_histogram < 0 and rsi > 25 and net_sentiment_score < 2.0:
             return "SELL"
     else:
-        # === NORMAL MODE: Adaptive with Enhanced Confirmation Logic ===
-        if is_trending_market:
-            # Sub-Regime: Normal Trending Market
-            bullish_trend = short_ema > long_ema
-            bearish_trend = short_ema < long_ema
+        # Sub-Regime: Choppy / Ranging Market (Mean-Reversion Logic)
+        is_reversing_up = macd_histogram > prev_macd_histogram
+        if rsi < 35 and current_price < lower_band and net_sentiment_score > -3.0 and is_reversing_up:
+            return "BUY"
             
-            # Profit-taking / exhaustion signal
-            is_momentum_fading_up = macd_histogram > 0 and macd_histogram < prev_macd_histogram
-            if bullish_trend and (rsi > 78 or current_price > upper_band) and is_momentum_fading_up:
-                return "SELL"
-
-            # Trend-following BUY with Donchian confirmation
-            if bullish_trend and macd_histogram > 0 and rsi < 75 and rsi > prev_rsi and net_sentiment_score > -2.5 and current_price >= lower_donchian:
-                return "BUY"
-            
-            # Trend-following SELL
-            if bearish_trend and macd_histogram < 0 and rsi > 25 and rsi < prev_rsi and net_sentiment_score < 2.5 and current_price <= upper_donchian:
-                return "SELL"
-        else:
-            # Sub-Regime: Choppy / Ranging Market (Mean-Reversion Logic)
-            is_reversing_up = macd_histogram > prev_macd_histogram
-            is_at_donchian_low = abs(current_price - lower_donchian) < (short_atr * 0.25)
-            if rsi < 35 and current_price < lower_band and is_at_donchian_low and net_sentiment_score > -3.0 and is_reversing_up and rsi > prev_rsi:
-                return "BUY"
-                
-            is_reversing_down = macd_histogram < prev_macd_histogram
-            is_at_donchian_high = abs(current_price - upper_donchian) < (short_atr * 0.25)
-            if rsi > 65 and current_price > upper_band and is_at_donchian_high and net_sentiment_score < 3.0 and is_reversing_down and rsi < prev_rsi:
-                return "SELL"
+        is_reversing_down = macd_histogram < prev_macd_histogram
+        if rsi > 65 and current_price > upper_band and net_sentiment_score < 3.0 and is_reversing_down:
+            return "SELL"
 
     return "HOLD"
