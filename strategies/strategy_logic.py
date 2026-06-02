@@ -147,7 +147,7 @@ def calculate_sentiment_score(news_context):
             if any(neg_word in post_context for neg_word in negation_words):
                 is_negated = not is_negated
             if is_negated:
-                weight *= 0.03  # Increased negation penalty
+                weight *= 0.05  # Increased negation penalty from 0.03 to 0.05
             net_sentiment_score += -weight if is_negated else weight
     return net_sentiment_score
 
