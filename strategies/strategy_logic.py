@@ -107,6 +107,23 @@ def calculate_keltner_channel(prices, period=20):
     lower_band = sma - (atr * 2)
     return upper_band, lower_band
 
+def calculate_adx(prices, period=14):
+    if len(prices) < period + 1:
+        return None
+    prices_arr = np.array(prices, dtype=float)
+    price_diffs = np.diff(prices_arr)
+    up_moves = np.where(price_diffs > 0, price_diffs, 0)
+    down_moves = np.where(price_diffs < 0, -price_diffs, 0)
+    up_ema = calculate_ema_series(up_moves, period)
+    down_ema = calculate_ema_series(down_moves, period)
+    if len(up_ema) == 0 or len(down_ema) == 0:
+        return None
+    plus_di = (up_ema[-1] / prices_arr[-1]) * 100
+    minus_di = (down_ema[-1] / prices_arr[-1]) * 100
+    dx = np.abs(plus_di - minus_di) / (plus_di + minus_di) * 100
+    adx = calculate_ema_series([dx], 3)
+    return adx[-1] if len(adx) > 0 else None
+
 def calculate_sentiment_score(news_context):
     context_lower = news_context.lower()
     sentiment_keywords = {
@@ -124,18 +141,30 @@ def calculate_sentiment_score(news_context):
         "sell-off": -2.0, "weak earnings": -2.0, "market turmoil": -2.0, "bubble": -2.0,
         "uncertainty": -1.5,
         "euphoria": -2.5, "mania": -3.0, "irrational exuberance": -3.0, "extreme greed": -2.5,
-        "market rebound": 2.5, "rebound potential": 2.0, "safe haven": 1.5,
-        "economic recovery": 2.0, "bull market": 2.0, "bear market": -2.0,
-        "inflation concerns": -1.0, "deflation risk": -2.0
     }
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent", "unlikely", "avoid", "no signs of", "unlikely to"]
     net_sentiment_score = 0.0
+    
+    # Dynamic weight adjustment based on market trend
+    all_prices = [150.0] + [145.0, 148.0, 152.0, 155.0, 158.0]  # Example price history
+    sma_50 = np.mean(all_prices[-50:]) if len(all_prices) >= 50 else np.mean(all_prices)
+    is_bullish = all_prices[-1] > sma_50
+    
     for keyword, weight in sentiment_keywords.items():
         pattern = r'(?<!\S)' + re.escape(keyword) + r'(?!\S)'
         for match in re.finditer(pattern, context_lower):
             pre_context = context_lower[max(0, match.start() - 50):match.start()]
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
-            net_sentiment_score += -weight if is_negated else weight
+            
+            # Adjust weight based on market regime
+            if is_bullish and keyword in ["rate hike", "hawkish"]:
+                adjusted_weight = weight * 0.5  # Less negative in bull markets
+            elif not is_bullish and keyword in ["rate cut", "dovish"]:
+                adjusted_weight = weight * 1.5  # More positive in bear markets
+            else:
+                adjusted_weight = weight
+                
+            net_sentiment_score += -adjusted_weight if is_negated else adjusted_weight
     return net_sentiment_score
 
 def decide(current_price, price_history, news_context):
@@ -151,7 +180,6 @@ def decide(current_price, price_history, news_context):
     sma_200 = np.mean(all_prices[-200:])
     ema_12 = calculate_ema_series(all_prices, 12)[-1] if len(all_prices) >= 12 else None
     ema_26 = calculate_ema_series(all_prices, 26)[-1] if len(all_prices) >= 26 else None
-    ema_9 = calculate_ema_series(all_prices, 9)[-1] if len(all_prices) >= 9 else None
     rsi = calculate_rsi(all_prices, 14)
     macd_line, signal_line, macd_hist_series = calculate_macd_series(all_prices)
     short_atr = calculate_atr(all_prices, 10)
@@ -162,8 +190,9 @@ def decide(current_price, price_history, news_context):
     stochastic_oscillator = calculate_stochastic_oscillator(all_prices)
     fi = calculate_force_index(all_prices, all_volumes)
     keltner_upper_band, keltner_lower_band = calculate_keltner_channel(all_prices)
+    adx = calculate_adx(all_prices)
 
-    if any(v is None for v in [sma_50, sma_200, ema_12, ema_26, ema_9, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, upper_band, lower_band, stochastic_oscillator, fi]) or \
+    if any(v is None for v in [sma_50, sma_200, ema_12, ema_26, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, upper_band, lower_band, stochastic_oscillator, fi, adx]) or \
        macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
 
@@ -182,11 +211,11 @@ def decide(current_price, price_history, news_context):
     is_extreme_crash_velocity = roc_20 < -18.0
     is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold
 
-    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 20 and ema_12 > ema_26 and ema_9 > ema_12:
+    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 20 and ema_12 > ema_26 and adx > 25:
         return "BUY"
 
     if is_crisis_regime:
-        is_recovering_from_oversold = rsi > 35 and macd_hist_delta > 0 and stochastic_oscillator > 80
+        is_recovering_from_oversold = rsi > 35 and macd_hist_delta > 0 and stochastic_oscillator > 80 and adx > 20
         if is_recovering_from_oversold and sentiment_score > -1.0:
             return "BUY"
         if macd_histogram < 0 or current_price < sma_50:
@@ -207,12 +236,12 @@ def decide(current_price, price_history, news_context):
     is_primary_downtrend = current_price < sma_50
     is_momentum_confirming_down = macd_histogram < 0 and prev_macd_histogram >= 0
     is_sentiment_permissive_for_sell = sentiment_score < 3.0
-    if is_primary_downtrend and is_momentum_confirming_down and is_sentiment_permissive_for_sell:
+    if is_primary_downtrend and is_momentum_confirming_down and is_sentiment_permissive_for_sell and adx > 25:
         return "SELL"
 
     is_momentum_fading = macd_hist_delta < 0
     is_extremely_overbought = rsi > 82
-    if is_extremely_overbought and is_momentum_fading:
+    if is_extremely_overbought and is_momentum_fading and adx > 25:
         return "SELL"
 
     is_primary_uptrend = current_price > sma_50
@@ -222,9 +251,10 @@ def decide(current_price, price_history, news_context):
     is_sufficient_volatility = short_atr > (long_atr * 0.6)
     is_price_in_bollinger_band = current_price > lower_band and current_price < upper_band
     is_price_in_keltner_channel = current_price > keltner_lower_band and current_price < keltner_upper_band
-    is_ema_crossover = ema_12 is not None and ema_26 is not None and ema_12 > ema_26 and ema_9 > ema_12
+    is_ema_crossover = ema_12 is not None and ema_26 is not None and ema_12 > ema_26
+    is_trend_strength = adx > 25
 
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_bollinger_band and is_price_in_keltner_channel and stochastic_oscillator > 20 and is_ema_crossover:
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_bollinger_band and is_price_in_keltner_channel and stochastic_oscillator > 20 and is_ema_crossover and is_trend_strength:
         return "BUY"
 
     return "HOLD"
