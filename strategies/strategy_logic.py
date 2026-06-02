@@ -66,15 +66,12 @@ def calculate_macd_series(prices, short_period=12, long_period=26, signal_period
     short_ema_series = calculate_ema_series(prices, short_period)
     long_ema_series = calculate_ema_series(prices, long_period)
     
-    # Align series by slicing the longer one
     macd_line = short_ema_series[len(short_ema_series)-len(long_ema_series):] - long_ema_series
     
     if len(macd_line) < signal_period:
         return None, None, None
         
     signal_line = calculate_ema_series(macd_line, signal_period)
-    
-    # Align histogram to the signal line
     histogram = macd_line[len(macd_line)-len(signal_line):] - signal_line
     
     return macd_line, signal_line, histogram
@@ -93,10 +90,28 @@ def calculate_bollinger_bands(prices, period=20, num_std_dev=2):
     
     return middle_band, upper_band, lower_band
 
+def calculate_atr(prices, period=14):
+    """
+    Calculates the Average True Range (ATR) using absolute price changes as a proxy for True Range,
+    as only closing prices are available.
+    """
+    if len(prices) < period + 1:
+        return None
+    prices_arr = np.array(prices, dtype=float)
+    # Using absolute price change as a proxy for True Range
+    true_ranges = np.abs(np.diff(prices_arr))
+    
+    # Wilder's smoothing for ATR
+    atr = np.mean(true_ranges[:period])
+    for i in range(period, len(true_ranges)):
+        atr = (atr * (period - 1) + true_ranges[i]) / period
+        
+    return atr
+
 def decide(current_price, price_history, news_context):
     """
     A self-improved, multi-regime trading strategy with proactive exit logic
-    to address passivity and reduce drawdowns.
+    and an ATR-based volatility filter for enhanced robustness.
 
     Parameters:
         current_price (float): The current day's closing price for SPY.
@@ -106,7 +121,7 @@ def decide(current_price, price_history, news_context):
     Returns:
         str: "BUY", "SELL", or "HOLD"
     """
-    # --- 1. Sentiment Analysis (Unchanged from robust parent) ---
+    # --- 1. Sentiment Analysis (with minor keyword enhancements) ---
     context_lower = news_context.lower()
     sentiment_keywords = {
         "fed pivot": 3.0, "rate cut": 2.5, "stimulus": 2.0, "soft landing": 2.0,
@@ -114,13 +129,14 @@ def decide(current_price, price_history, news_context):
         "strong earnings": 2.0, "cooling inflation": 1.5, "disinflation": 1.5,
         "ai boom": 2.0, "technological breakthrough": 2.0, "easing tensions": 1.5,
         "beat": 1.5, "growth": 1.5, "recovery": 1.5, "upgrade": 1.5, "strong jobs": 2.0,
-        "consumer confidence": 1.5,
+        "consumer confidence": 1.5, "better than expected": 1.5, "strong guidance": 1.5,
         "rate hike": -2.5, "recession": -2.5, "crisis": -2.5, "bankruptcy": -2.5,
         "hard landing": -2.5, "stagflation": -2.5, "hawkish": -2.0, "bearish": -2.0,
         "plunge": -2.0, "inflation": -2.0, "sell-off": -2.0, "weak earnings": -2.0,
         "geopolitical risk": -2.0, "market turmoil": -2.0, "credit crunch": -2.5,
         "tightening": -1.5, "miss": -1.5, "downgrade": -1.5, "tariff": -1.5,
-        "supply chain disruption": -1.5, "uncertainty": -1.5, "weak jobs": -2.0
+        "supply chain disruption": -1.5, "uncertainty": -1.5, "weak jobs": -2.0,
+        "worse than expected": -1.5, "weak guidance": -1.5, "geopolitical tensions": -2.0
     }
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids"]
     net_sentiment_score = 0.0
@@ -138,7 +154,7 @@ def decide(current_price, price_history, news_context):
     LONG_EMA_PERIOD = 26
     RSI_PERIOD = 14
     BB_PERIOD = 20
-    VOL_SHORT_PERIOD = 20
+    VOL_SHORT_PERIOD = 14 # Aligned with ATR standard
     VOL_LONG_PERIOD = 100
 
     required_history_length = max(LONG_EMA_PERIOD + 9, VOL_LONG_PERIOD + 1)
@@ -151,18 +167,19 @@ def decide(current_price, price_history, news_context):
     rsi = calculate_rsi(all_prices, RSI_PERIOD)
     _, upper_band, lower_band = calculate_bollinger_bands(all_prices, BB_PERIOD)
     _, _, macd_hist_series = calculate_macd_series(all_prices)
+    
+    # **IMPROVEMENT**: ATR-based volatility regime detection
+    short_atr = calculate_atr(all_prices, VOL_SHORT_PERIOD)
+    long_atr = calculate_atr(all_prices, VOL_LONG_PERIOD)
 
-    if any(v is None for v in [short_ema, long_ema, rsi, upper_band]) or macd_hist_series is None or len(macd_hist_series) < 3:
+    if any(v is None for v in [short_ema, long_ema, rsi, upper_band, short_atr, long_atr]) or macd_hist_series is None or len(macd_hist_series) < 3:
         return "HOLD"
     
     macd_histogram = macd_hist_series[-1]
     prev_macd_histogram = macd_hist_series[-2]
 
-    # Adaptive Volatility Regime
-    log_returns = np.log(np.array(all_prices)[1:] / np.array(all_prices)[:-1])
-    short_term_vol = np.std(log_returns[-VOL_SHORT_PERIOD:])
-    long_term_vol = np.std(log_returns[-VOL_LONG_PERIOD:])
-    is_high_volatility = (short_term_vol > long_term_vol * 1.5) and (short_term_vol > 0.015)
+    # Regime is high volatility if recent ATR is >160% of long-term ATR and is significant relative to price
+    is_high_volatility = (short_atr > long_atr * 1.6) and (short_atr / current_price > 0.015)
 
     # --- 3. Multi-Regime Decision Logic ---
     if is_high_volatility:
@@ -187,14 +204,12 @@ def decide(current_price, price_history, news_context):
             bullish_trend = short_ema > long_ema
             bearish_trend = short_ema < long_ema
             
-            # **IMPROVEMENT**: Proactive profit-taking / trend exhaustion signal
-            # Sell if trend is up, but RSI is extremely overbought and momentum is fading
+            # **IMPROVEMENT**: Stricter proactive profit-taking on trend exhaustion
             is_momentum_fading = macd_histogram > 0 and macd_histogram < prev_macd_histogram
-            if bullish_trend and rsi > 78 and is_momentum_fading:
+            if bullish_trend and rsi > 75 and is_momentum_fading and current_price > upper_band:
                 return "SELL"
 
-            # **IMPROVEMENT**: Relaxed entry, using sentiment as a veto
-            # Buy if trend is bullish and confirmed by momentum, unless news is very bad
+            # Relaxed entry, using sentiment as a veto
             if bullish_trend and macd_histogram > 0 and rsi < 75 and net_sentiment_score > -1.5:
                 return "BUY"
             
@@ -202,7 +217,7 @@ def decide(current_price, price_history, news_context):
             if bearish_trend and macd_histogram < 0 and rsi > 25 and net_sentiment_score < 1.5:
                 return "SELL"
         else:
-            # Sub-Regime: Choppy / Ranging Market (Mean-Reversion, unchanged from parent)
+            # Sub-Regime: Choppy / Ranging Market (Mean-Reversion)
             MEDIUM_TERM_SMA_PERIOD = 50
             if len(all_prices) < MEDIUM_TERM_SMA_PERIOD:
                 return "HOLD"
@@ -211,13 +226,16 @@ def decide(current_price, price_history, news_context):
             if medium_sma is None:
                 return "HOLD"
 
-            # Buy the dip if confirmed by RSI, Bollinger Bands, and medium-term trend
-            if (rsi < 30 and current_price < lower_band) and \
-               (net_sentiment_score > -2.0) and (current_price > medium_sma):
+            # **IMPROVEMENT**: More flexible mean-reversion entry
+            is_momentum_turning_positive = macd_histogram > 0 and prev_macd_histogram <= 0
+            buy_the_dip_signal = (rsi < 35 and current_price < lower_band)
+            
+            # Buy if oversold and either medium trend is up OR momentum is just turning positive
+            if buy_the_dip_signal and net_sentiment_score > -2.0 and (current_price > medium_sma or is_momentum_turning_positive):
                 return "BUY"
-            # Sell the rip if confirmed by RSI and Bollinger Bands
-            elif (rsi > 70 and current_price > upper_band) and \
-                 (net_sentiment_score < 2.0):
+            
+            # Sell the rip if overbought (unchanged from parent)
+            elif (rsi > 70 and current_price > upper_band) and (net_sentiment_score < 2.0):
                 return "SELL"
 
     return "HOLD"
