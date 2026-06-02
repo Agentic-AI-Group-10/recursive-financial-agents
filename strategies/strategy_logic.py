@@ -141,8 +141,8 @@ def calculate_sentiment_score(news_context):
     for keyword, weight in sentiment_keywords.items():
         pattern = r'(?<!\S)(?i)' + re.escape(keyword) + r'(?!\S)'
         for match in re.finditer(pattern, context_lower):
-            pre_context = context_lower[max(0, match.start() - 150):match.start()]
-            post_context = context_lower[match.end():match.end() + 150]
+            pre_context = context_lower[max(0, match.start() - 200):match.start()]
+            post_context = context_lower[match.end():match.end() + 200]
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
             if any(neg_word in post_context for neg_word in negation_words):
                 is_negated = not is_negated
