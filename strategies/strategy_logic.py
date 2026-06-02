@@ -94,24 +94,25 @@ def calculate_keltner_channel(prices, period=20):
     return upper_band, lower_band
 
 def calculate_adx(prices, period=14):
-    if len(prices) < period + 1:
+    if len(prices) < period * 2 + 1:
         return None
     prices_arr = np.array(prices, dtype=float)
-    dm_plus = np.zeros(len(prices_arr))
-    dm_minus = np.zeros(len(prices_arr))
+    plus_dm = np.zeros(len(prices_arr) - 1)
+    minus_dm = np.zeros(len(prices_arr) - 1)
     for i in range(1, len(prices_arr)):
-        price_diff = prices_arr[i] - prices_arr[i-1]
-        dm_plus[i] = max(prices_arr[i] - prices_arr[i-1], 0) if price_diff > 0 else 0
-        dm_minus[i] = max(prices_arr[i-1] - prices_arr[i], 0) if price_diff < 0 else 0
+        up_move = prices_arr[i] - prices_arr[i-1]
+        down_move = prices_arr[i-1] - prices_arr[i]
+        plus_dm[i-1] = up_move if up_move > down_move and up_move > 0 else 0
+        minus_dm[i-1] = down_move if down_move > up_move and down_move > 0 else 0
+    
     tr = np.abs(np.diff(prices_arr))
-    atr = calculate_ema_series(tr, period)
-    dm_plus_series = calculate_ema_series(dm_plus, period)
-    dm_minus_series = calculate_ema_series(dm_minus, period)
-    if len(dm_plus_series) < 2 or len(dm_minus_series) < 2 or len(atr) < 2:
+    atr_series = calculate_ema_series(tr, period)
+    if atr_series is None or len(atr_series) < len(plus_dm):
         return None
-    di_plus = dm_plus_series[-2:] / atr[-2:]
-    di_minus = dm_minus_series[-2:] / atr[-2:]
-    dx = np.abs((di_plus - di_minus) / (di_plus + di_minus))
+    
+    plus_di = calculate_ema_series(plus_dm, period) / atr_series * 100
+    minus_di = calculate_ema_series(minus_dm, period) / atr_series * 100
+    dx = np.abs(plus_di - minus_di) / (plus_di + minus_di) * 100
     adx = calculate_ema_series(dx, period)
     return adx[-1] if len(adx) > 0 else None
 
@@ -149,7 +150,7 @@ def calculate_sentiment_score(news_context):
             if any(neg_word in post_context for neg_word in negation_words):
                 is_negated = not is_negated
             if is_negated:
-                weight *= 0.3  # Reduce impact of negated terms
+                weight *= 0.2  # Aggressive negation reduction
             net_sentiment_score += -weight if is_negated else weight
     return net_sentiment_score
 
@@ -199,13 +200,13 @@ def decide(current_price, price_history, news_context):
 
     is_deeply_oversold = rsi < 30
     is_extreme_crash_velocity = roc_20 < -18.0
-    is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold and current_price < donchian_low_30 and (short_atr > long_atr * 1.2) and adx > 25
+    is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold and current_price < donchian_low_30 and (short_atr > long_atr * 1.2)
 
-    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 20 and ema_12 > ema_26 and sentiment_score > -2.0:
+    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 20 and ema_12 > ema_26 and sentiment_score > -2.0 and adx > 25:
         return "BUY"
 
     if is_crisis_regime:
-        is_recovering_from_oversold = rsi > 35 and macd_hist_delta > 0 and stochastic_oscillator > 80 and sentiment_score > -1.0
+        is_recovering_from_oversold = rsi > 35 and macd_hist_delta > 0 and stochastic_oscillator > 80 and sentiment_score > -1.0 and adx < 20
         if is_recovering_from_oversold:
             return "BUY"
         if macd_histogram < 0 or current_price < sma_50:
@@ -242,9 +243,9 @@ def decide(current_price, price_history, news_context):
     is_sufficient_volatility = short_atr > (long_atr * 0.6)
     is_price_in_keltner_channel = current_price > keltner_lower_band and current_price < keltner_upper_band
     is_ema_crossover = ema_12 is not None and ema_26 is not None and ema_12 > ema_26
-    is_trending = adx > 25
+    is_trend_strength = adx > 25
 
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_keltner_channel and stochastic_oscillator > 25 and is_ema_crossover and is_trending:
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_keltner_channel and stochastic_oscillator > 25 and is_ema_crossover and is_trend_strength:
         return "BUY"
 
     return "HOLD"
