@@ -126,8 +126,8 @@ def decide(current_price, price_history, news_context):
 
     all_prices = price_history + [current_price]
 
-    SMA_TREND_LONG = 100
-    SMA_TREND_MEDIUM = 50
+    SMA_TREND_LONG = max(100, len(all_prices) // 2)
+    SMA_TREND_MEDIUM = max(50, len(all_prices) // 4)
     RSI_PERIOD = 14
     ATR_SHORT = 10
     ATR_LONG = 50
