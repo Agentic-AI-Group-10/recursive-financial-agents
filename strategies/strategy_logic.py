@@ -102,6 +102,23 @@ def calculate_keltner_channel(prices, period=20):
     lower_band = sma - (atr * 2)
     return upper_band, lower_band
 
+def calculate_adx(prices, period=14):
+    if len(prices) < period + 1:
+        return None
+    prices_arr = np.array(prices, dtype=float)
+    plus_dm = np.where((prices_arr[1:] - prices_arr[:-1]) > 0, prices_arr[1:] - prices_arr[:-1], 0)
+    minus_dm = np.where((prices_arr[1:] - prices_arr[:-1]) < 0, -(prices_arr[1:] - prices_arr[:-1]), 0)
+    tr = np.abs(prices_arr[1:] - prices_arr[:-1])
+    plus_ema = calculate_ema_series(plus_dm, period)
+    minus_ema = calculate_ema_series(minus_dm, period)
+    if len(plus_ema) < 1 or len(minus_ema) < 1:
+        return None
+    plus_di = 100 * (plus_ema[-1] / calculate_atr(prices_arr, period))
+    minus_di = 100 * (minus_ema[-1] / calculate_atr(prices_arr, period))
+    dx = np.abs((plus_di - minus_di) / (plus_di + minus_di)) * 100
+    adx = calculate_ema_series(dx, period)
+    return adx[-1] if len(adx) > 0 else None
+
 def calculate_sentiment_score(news_context):
     context_lower = news_context.lower()
     sentiment_keywords = {
@@ -174,8 +191,9 @@ def decide(current_price, price_history, news_context):
     stochastic_oscillator = calculate_stochastic_oscillator(all_prices)
     keltner_upper_band, keltner_lower_band = calculate_keltner_channel(all_prices)
     bollinger_upper, bollinger_lower, bollinger_sma = calculate_bollinger_bands(all_prices)
+    adx = calculate_adx(all_prices)
 
-    if any(v is None for v in [sma_50, ema_12, ema_26, ema_9, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, stochastic_oscillator]) or \
+    if any(v is None for v in [sma_50, ema_12, ema_26, ema_9, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, stochastic_oscillator, adx]) or \
        macd_hist_series is None or len(macd_hist_series) < 2 or bollinger_upper is None:
         return "HOLD"
 
@@ -194,7 +212,7 @@ def decide(current_price, price_history, news_context):
     is_extreme_crash_velocity = roc_20 < -18.0
     is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold and current_price < donchian_low_30 and (short_atr > long_atr * 1.2) and current_price < keltner_lower_band
 
-    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 15 and ema_12 > ema_26 and sentiment_score > -1.5:
+    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 15 and ema_12 > ema_26 and sentiment_score > -1.5 and adx > 25:
         return "BUY"
 
     if is_crisis_regime:
@@ -237,7 +255,7 @@ def decide(current_price, price_history, news_context):
     is_ema_crossover = ema_12 is not None and ema_26 is not None and ema_12 > ema_26
     is_bollinger_in_range = current_price > bollinger_lower and current_price < bollinger_upper
 
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_keltner_channel and is_bollinger_in_range and stochastic_oscillator > 30 and is_ema_crossover:
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_keltner_channel and is_bollinger_in_range and stochastic_oscillator > 30 and is_ema_crossover and adx > 20:
         return "BUY"
 
     return "HOLD"
