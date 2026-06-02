@@ -93,6 +93,30 @@ def calculate_stochastic_oscillator(prices, period=14):
     highest_high = np.max(prices[-period:])
     return ((prices[-1] - lowest_low) / (highest_high - lowest_low)) * 100
 
+def calculate_force_index(prices, volume):
+    if len(prices) < 2 or len(volume) < 2:
+        return None
+    return np.sum(np.diff(prices) * np.diff(volume)) / len(volume)
+
+def calculate_keltner_channel(prices, period=20):
+    if len(prices) < period:
+        return None, None
+    sma = np.mean(prices[-period:])
+    atr = calculate_atr(prices, period)
+    upper_band = sma + (atr * 2)
+    lower_band = sma - (atr * 2)
+    return upper_band, lower_band
+
+def calculate_ichimoku_cloud(prices, period=26):
+    if len(prices) < period:
+        return None, None, None, None, None
+    tenkan_sen = np.mean(prices[-9:])
+    kijun_sen = np.mean(prices[-26:])
+    senkou_span_a = (tenkan_sen + kijun_sen) / 2
+    senkou_span_b = np.mean(prices[-52:])
+    chikou_span = prices[-26]
+    return tenkan_sen, kijun_sen, senkou_span_a, senkou_span_b, chikou_span
+
 def calculate_sentiment_score(news_context):
     context_lower = news_context.lower()
     sentiment_keywords = {
@@ -125,16 +149,6 @@ def calculate_sentiment_score(news_context):
         for match in re.finditer(pattern, context_lower):
             net_sentiment_score += 2.5
     return net_sentiment_score
-
-def calculate_ichimoku_cloud(prices, period=26):
-    if len(prices) < period:
-        return None, None, None, None, None
-    tenkan_sen = np.mean(prices[-9:])
-    kijun_sen = np.mean(prices[-26:])
-    senkou_span_a = (tenkan_sen + kijun_sen) / 2
-    senkou_span_b = np.mean(prices[-52:])
-    chikou_span = prices[-26]
-    return tenkan_sen, kijun_sen, senkou_span_a, senkou_span_b, chikou_span
 
 def decide(current_price, price_history, news_context):
     context_lower = news_context.lower()
