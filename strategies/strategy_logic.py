@@ -154,12 +154,13 @@ def calculate_sentiment_score(news_context):
         "technical breakout": 2.6, "short covering": 2.8, "liquidity crunch": -2.9,
         "margin squeeze": -2.8, "deleveraging": -2.6, "credit expansion": 2.4,
         "policy clarity": 2.5, "market stability": 2.6, "economic resilience": 2.7,
-        "bullish momentum": 2.5, "bearish momentum": -2.5, "market breadth contraction": -1.8
+        "bullish momentum": 2.5, "bearish momentum": -2.5, "market breadth contraction": -1.8,
+        "supply chain issues": -2.4, "interest rate pause": 2.3, "geopolitical tension": -2.3
     }
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent", "unlikely", "avoid", "no signs of", "unlikely to", "lack", "absence", "never", "none", "neglect", "without", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "never again", "no longer", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "without any", "lack any", "fail any", "struggle any", "prevent any", "avoid any", "unlikely any", "neglect any", "no longer any", "lack of any", "fail of any", "struggle of any", "prevent of any", "avoid of any", "unlikely of any", "neglect of any", "doesn't", "doesn't show", "doesn't indicate", "doesn't suggest", "isn't showing", "isn't indicating", "isn't suggesting", "lacks", "fails to", "struggles to", "avoids", "prevents", "unlikely to", "avoiding", "lacking", "failing to", "struggling to", "preventing", "avoiding", "unlikely showing", "lacking any", "failing any", "struggling any", "preventing any", "avoiding any", "unlikely any"]
     net_sentiment_score = 0.0
     for keyword, weight in sentiment_keywords.items():
-        pattern = r'(?<!\S)(?i)' + re.escape(keyword) + r'(?!\S)'
+        pattern = r'\b' + re.escape(keyword) + r'\b'
         for match in re.finditer(pattern, context_lower):
             pre_context = context_lower[max(0, match.start() - 100):match.start()]
             post_context = context_lower[match.end():match.end() + 100]
@@ -229,7 +230,7 @@ def decide(current_price, price_history, news_context):
 
     is_long_term_downtrend = current_price < sma_200 if sma_200 is not None else False
     is_crash_velocity = roc_20 < -18.0
-    is_crisis_regime = (is_long_term_downtrend and is_high_volatility) or is_crash_velocity or ("yield curve inversion" in context_lower) or "banking crisis" in context_lower or "sovereign debt" in context_lower or "financial crisis" in context_lower
+    is_crisis_regime = (is_long_term_downtrend and is_high_volatility) or is_crash_velocity or ("yield curve inversion" in context_lower) or "banking crisis" in context_lower or "sovereign debt" in context_lower or "financial crisis" in context_lower or "systemic risk" in context_lower
 
     is_deeply_oversold = rsi < 25
     is_extreme_crash_velocity = roc_20 < -22.0
