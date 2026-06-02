@@ -114,20 +114,24 @@ def calculate_sentiment_score(news_context):
         "market rebound": 2.7, "rebound potential": 2.2, "safe haven": 1.6,
         "economic recovery": 2.2, "bull market": 2.2, "bear market": -2.2,
         "inflation concerns": -1.1, "deflation risk": -2.2, "market breadth": 1.1,
-        "geopolitical stability": 2.2, "market resilience": 2.2
+        "geopolitical stability": 2.2, "market resilience": 2.2,
+        "central bank intervention": 2.8, "monetary easing": 2.6, "fiscal stimulus": 2.4,
+        "market rotation": 1.8, "risk on": 2.3, "risk off": -2.3, "safe haven demand": 2.0,
+        "economic expansion": 2.1, "growth acceleration": 2.5, "policy uncertainty": -2.0,
+        "sector rotation": 1.9, "valuation expansion": 1.7, "valuation contraction": -1.7
     }
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent", "unlikely", "avoid", "no signs of", "unlikely to", "lack", "absence", "never", "none", "neglect", "without", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "never again", "no longer", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect"]
     net_sentiment_score = 0.0
     for keyword, weight in sentiment_keywords.items():
         pattern = r'(?<!\S)(?i)' + re.escape(keyword) + r'(?!\S)'
         for match in re.finditer(pattern, context_lower):
-            pre_context = context_lower[max(0, match.start() - 200):match.start()]  # Expanded context window
-            post_context = context_lower[match.end():match.end() + 200]
+            pre_context = context_lower[max(0, match.start() - 300):match.start()]
+            post_context = context_lower[match.end():match.end() + 300]
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
             if any(neg_word in post_context for neg_word in negation_words):
                 is_negated = not is_negated
             if is_negated:
-                weight *= 0.25
+                weight *= 0.2
             net_sentiment_score += -weight if is_negated else weight
     return net_sentiment_score
 
@@ -135,20 +139,21 @@ def decide(current_price, price_history, news_context):
     context_lower = news_context.lower()
     sentiment_score = calculate_sentiment_score(news_context)
     all_prices = price_history + [current_price]
+    price_len = len(all_prices)
 
-    if len(all_prices) < 50:
+    if price_len < 50:
         return "HOLD"
 
     sma_50 = np.mean(all_prices[-50:])
-    sma_200 = np.mean(all_prices[-200:])
+    sma_200 = np.mean(all_prices[-200:]) if price_len >= 200 else None
     
-    ema_short = 5 if len(all_prices) < 30 else 12
-    ema_long = 10 if len(all_prices) < 30 else 26
-    ema_signal = 5 if len(all_prices) < 30 else 9
+    ema_short = 5 if price_len < 30 else 12
+    ema_long = 10 if price_len < 30 else 26
+    ema_signal = 5 if price_len < 30 else 9
     
-    ema_12 = calculate_ema_series(all_prices, ema_short)[-1] if len(all_prices) >= ema_short else None
-    ema_26 = calculate_ema_series(all_prices, ema_long)[-1] if len(all_prices) >= ema_long else None
-    ema_9 = calculate_ema_series(all_prices, ema_signal)[-1] if len(all_prices) >= ema_signal else None
+    ema_12 = calculate_ema_series(all_prices, ema_short)[-1] if price_len >= ema_short else None
+    ema_26 = calculate_ema_series(all_prices, ema_long)[-1] if price_len >= ema_long else None
+    ema_9 = calculate_ema_series(all_prices, ema_signal)[-1] if price_len >= ema_signal else None
     
     rsi = calculate_rsi(all_prices, 14)
     macd_line, signal_line, macd_hist_series = calculate_macd_series(all_prices)
@@ -159,7 +164,7 @@ def decide(current_price, price_history, news_context):
     stochastic_oscillator = calculate_stochastic_oscillator(all_prices)
     keltner_upper_band, keltner_lower_band = calculate_keltner_channel(all_prices)
 
-    if any(v is None for v in [sma_50, sma_200, ema_12, ema_26, ema_9, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, stochastic_oscillator]) or \
+    if any(v is None for v in [sma_50, ema_12, ema_26, ema_9, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, stochastic_oscillator]) or \
        macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
 
@@ -170,11 +175,11 @@ def decide(current_price, price_history, news_context):
     is_high_volatility = short_atr > (long_atr * 1.75)
     is_extreme_volatility = short_atr > (long_atr * 2.0)
 
-    is_long_term_downtrend = current_price < sma_200
+    is_long_term_downtrend = current_price < sma_200 if sma_200 is not None else False
     is_crash_velocity = roc_20 < -15.0
     is_crisis_regime = (is_long_term_downtrend and is_high_volatility) or is_crash_velocity
 
-    is_deeply_oversold = rsi < 25  # Tightened from 30 to 25
+    is_deeply_oversold = rsi < 25
     is_extreme_crash_velocity = roc_20 < -18.0
     is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold and current_price < donchian_low_30 and (short_atr > long_atr * 1.2) and current_price < keltner_lower_band
 
@@ -202,7 +207,7 @@ def decide(current_price, price_history, news_context):
 
     is_primary_downtrend = current_price < sma_50
     is_momentum_confirming_down = macd_histogram < 0 and prev_macd_histogram >= 0
-    is_sentiment_permissive_for_sell = sentiment_score < 2.0  # Tightened from 3.0 to 2.0
+    is_sentiment_permissive_for_sell = sentiment_score < 2.0
     if is_primary_downtrend and is_momentum_confirming_down and is_sentiment_permissive_for_sell:
         return "SELL"
 
@@ -212,10 +217,10 @@ def decide(current_price, price_history, news_context):
     if is_extremely_overbought and is_momentum_fading:
         return "SELL"
 
-    is_primary_uptrend = current_price > sma_50 and sma_50 > sma_200
+    is_primary_uptrend = current_price > sma_50 and (sma_200 is None or current_price > sma_200)
     is_momentum_confirming_up = macd_histogram > 0 and prev_macd_histogram <= 0
-    is_not_overbought = rsi < (75 if is_high_volatility else 72)  # Tightened from 80/78 to 75/72
-    is_sentiment_permissive_for_buy = sentiment_score > -2.5  # Tightened from -3.0 to -2.5
+    is_not_overbought = rsi < (75 if is_high_volatility else 72)
+    is_sentiment_permissive_for_buy = sentiment_score > -2.5
     is_sufficient_volatility = short_atr > (long_atr * 0.6)
     is_price_in_keltner_channel = current_price > keltner_lower_band and current_price < keltner_upper_band
     is_ema_crossover = ema_12 is not None and ema_26 is not None and ema_12 > ema_26
