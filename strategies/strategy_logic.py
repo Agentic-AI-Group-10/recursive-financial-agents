@@ -143,11 +143,6 @@ def calculate_sentiment_score(news_context):
             pre_context = context_lower[max(0, match.start() - 30):match.start()]
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
             net_sentiment_score += -weight if is_negated else weight
-    phrases = ["fed pivot", "rate cut", "quantitative easing", "soft landing", "cooling inflation"]
-    for phrase in phrases:
-        pattern = r'\b' + re.escape(phrase) + r'\b'
-        for match in re.finditer(pattern, context_lower):
-            net_sentiment_score += 2.5
     return net_sentiment_score
 
 def decide(current_price, price_history, news_context):
