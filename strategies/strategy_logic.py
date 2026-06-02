@@ -147,13 +147,13 @@ def calculate_sentiment_score(news_context):
     for keyword, weight in sentiment_keywords.items():
         pattern = r'(?<!\S)(?i)' + re.escape(keyword) + r'(?!\S)'
         for match in re.finditer(pattern, context_lower):
-            pre_context = context_lower[max(0, match.start() - 200):match.start()]
-            post_context = context_lower[match.end():match.end() + 200]
+            pre_context = context_lower[max(0, match.start() - 100):match.start()]
+            post_context = context_lower[match.end():match.end() + 100]
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
             if any(neg_word in post_context for neg_word in negation_words):
                 is_negated = not is_negated
             if is_negated:
-                weight *= 0.1  # Reduced impact for negated terms
+                weight *= 0.05  # Aggressive reduction for negated terms
             net_sentiment_score += -weight if is_negated else weight
     return net_sentiment_score
 
@@ -220,11 +220,11 @@ def decide(current_price, price_history, news_context):
     is_extreme_crash_velocity = roc_20 < -22.0
     is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold and current_price < donchian_low_30 and (short_atr > long_atr * 1.2) and current_price < keltner_lower_band and current_price > keltner_lower_band - (short_atr * 0.5)
 
-    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 15 and ema_12 > ema_26 and sentiment_score > -1.5 and macd_hist_acceleration > 0 and signal_line[-1] < macd_histogram and ichimoku_a > ichimoku_b:
+    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 15 and ema_12 > ema_26 and sentiment_score > -1.5 and macd_hist_acceleration > 0 and signal_line[-1] < macd_histogram and ichimoku_a > ichimoku_b and current_price > ichimoku_a:
         return "BUY"
 
     if is_crisis_regime:
-        is_recovering_from_oversold = rsi > 40 and macd_hist_delta > 0 and stochastic_oscillator > 85 and sentiment_score > -0.5 and ichimoku_a > ichimoku_b
+        is_recovering_from_oversold = rsi > 40 and macd_hist_delta > 0 and stochastic_oscillator > 85 and sentiment_score > -0.5 and ichimoku_a > ichimoku_b and current_price > ichimoku_a
         if is_recovering_from_oversold:
             return "BUY"
         if macd_histogram < 0 or current_price < sma_50:
@@ -263,9 +263,9 @@ def decide(current_price, price_history, news_context):
     is_price_in_keltner_channel = current_price > keltner_lower_band and current_price < keltner_upper_band
     is_ema_crossover = ema_12 is not None and ema_26 is not None and ema_12 > ema_26
     is_bollinger_in_range = current_price > bollinger_lower and current_price < bollinger_upper
-    is_ichimoku_cloud_positive = ichimoku_a > ichimoku_b
+    is_ichimoku_cloud_positive = ichimoku_a > ichimoku_b and current_price > ichimoku_a
 
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_keltner_channel and is_bollinger_in_range and stochastic_oscillator > 30 and is_ema_crossover and macd_hist_acceleration > 0 and is_ichimoku_cloud_positive and current_price > ichimoku_a:
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_keltner_channel and is_bollinger_in_range and stochastic_oscillator > 30 and is_ema_crossover and macd_hist_acceleration > 0 and is_ichimoku_cloud_positive:
         return "BUY"
 
     return "HOLD"
