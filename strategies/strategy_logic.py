@@ -93,6 +93,28 @@ def calculate_keltner_channel(prices, period=20):
     lower_band = sma - (atr * 2)
     return upper_band, lower_band
 
+def calculate_adx(prices, period=14):
+    if len(prices) < period + 1:
+        return None
+    prices_arr = np.array(prices, dtype=float)
+    dm_plus = np.zeros(len(prices_arr))
+    dm_minus = np.zeros(len(prices_arr))
+    for i in range(1, len(prices_arr)):
+        price_diff = prices_arr[i] - prices_arr[i-1]
+        dm_plus[i] = max(prices_arr[i] - prices_arr[i-1], 0) if price_diff > 0 else 0
+        dm_minus[i] = max(prices_arr[i-1] - prices_arr[i], 0) if price_diff < 0 else 0
+    tr = np.abs(np.diff(prices_arr))
+    atr = calculate_ema_series(tr, period)
+    dm_plus_series = calculate_ema_series(dm_plus, period)
+    dm_minus_series = calculate_ema_series(dm_minus, period)
+    if len(dm_plus_series) < 2 or len(dm_minus_series) < 2 or len(atr) < 2:
+        return None
+    di_plus = dm_plus_series[-2:] / atr[-2:]
+    di_minus = dm_minus_series[-2:] / atr[-2:]
+    dx = np.abs((di_plus - di_minus) / (di_plus + di_minus))
+    adx = calculate_ema_series(dx, period)
+    return adx[-1] if len(adx) > 0 else None
+
 def calculate_sentiment_score(news_context):
     context_lower = news_context.lower()
     sentiment_keywords = {
@@ -158,8 +180,9 @@ def decide(current_price, price_history, news_context):
     donchian_high_30, donchian_low_30 = calculate_donchian_channel(all_prices, 30)
     stochastic_oscillator = calculate_stochastic_oscillator(all_prices)
     keltner_upper_band, keltner_lower_band = calculate_keltner_channel(all_prices)
+    adx = calculate_adx(all_prices)
 
-    if any(v is None for v in [sma_50, sma_200, ema_12, ema_26, ema_9, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, stochastic_oscillator]) or \
+    if any(v is None for v in [sma_50, sma_200, ema_12, ema_26, ema_9, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, stochastic_oscillator, adx]) or \
        macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
 
@@ -176,7 +199,7 @@ def decide(current_price, price_history, news_context):
 
     is_deeply_oversold = rsi < 30
     is_extreme_crash_velocity = roc_20 < -18.0
-    is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold and current_price < donchian_low_30 and (short_atr > long_atr * 1.2)
+    is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold and current_price < donchian_low_30 and (short_atr > long_atr * 1.2) and adx > 25
 
     if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 20 and ema_12 > ema_26 and sentiment_score > -2.0:
         return "BUY"
@@ -219,8 +242,9 @@ def decide(current_price, price_history, news_context):
     is_sufficient_volatility = short_atr > (long_atr * 0.6)
     is_price_in_keltner_channel = current_price > keltner_lower_band and current_price < keltner_upper_band
     is_ema_crossover = ema_12 is not None and ema_26 is not None and ema_12 > ema_26
+    is_trending = adx > 25
 
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_keltner_channel and stochastic_oscillator > 25 and is_ema_crossover:
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_keltner_channel and stochastic_oscillator > 25 and is_ema_crossover and is_trending:
         return "BUY"
 
     return "HOLD"
