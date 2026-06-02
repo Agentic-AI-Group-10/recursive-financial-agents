@@ -119,7 +119,7 @@ def calculate_sentiment_score(news_context):
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent", "unlikely", "avoid", "no signs of", "unlikely to", "lack", "absence", "never", "none", "neglect", "without", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "never again", "no longer", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect"]
     net_sentiment_score = 0.0
     for keyword, weight in sentiment_keywords.items():
-        pattern = r'(?<!\S)' + re.escape(keyword) + r'(?!\S)'
+        pattern = r'(?<!\S)(?i)' + re.escape(keyword) + r'(?!\S)'
         for match in re.finditer(pattern, context_lower):
             pre_context = context_lower[max(0, match.start() - 150):match.start()]
             post_context = context_lower[match.end():match.end() + 150]
@@ -140,7 +140,6 @@ def decide(current_price, price_history, news_context):
     sma_50 = np.mean(all_prices[-50:])
     sma_200 = np.mean(all_prices[-200:])
     
-    # Adaptive EMA periods based on data length
     ema_short = 5 if len(all_prices) < 30 else 12
     ema_long = 10 if len(all_prices) < 30 else 26
     ema_signal = 5 if len(all_prices) < 30 else 9
@@ -206,13 +205,14 @@ def decide(current_price, price_history, news_context):
         return "SELL"
 
     is_momentum_fading = macd_hist_delta < 0
-    is_extremely_overbought = rsi > (82 if not is_high_volatility else 85)
+    overbought_threshold = 85 if is_high_volatility else 82
+    is_extremely_overbought = rsi > overbought_threshold
     if is_extremely_overbought and is_momentum_fading:
         return "SELL"
 
     is_primary_uptrend = current_price > sma_50 and sma_50 > sma_200
     is_momentum_confirming_up = macd_histogram > 0 and prev_macd_histogram <= 0
-    is_not_overbought = rsi < (78 if not is_high_volatility else 80)
+    is_not_overbought = rsi < (80 if is_high_volatility else 78)
     is_sentiment_permissive_for_buy = sentiment_score > -3.0
     is_sufficient_volatility = short_atr > (long_atr * 0.6)
     is_price_in_keltner_channel = current_price > keltner_lower_band and current_price < keltner_upper_band
