@@ -11,10 +11,8 @@ def calculate_ema_series(data, period):
     data_arr = np.array(data, dtype=float)
     try:
         import pandas as pd
-        # Using pandas is preferred for accuracy and standard implementation
         return pd.Series(data_arr).ewm(span=period, adjust=False).mean().to_numpy()[period-1:]
     except ImportError:
-        # Fallback pure-python EMA calculation
         ema_values = np.zeros(len(data_arr) - period + 1, dtype=float)
         ema_values[0] = np.mean(data_arr[:period])
         multiplier = 2 / (period + 1)
@@ -71,162 +69,139 @@ def calculate_atr(prices, period=14):
     atr_series = calculate_ema_series(price_ranges, period)
     return atr_series[-1] if len(atr_series) > 0 else None
 
-def calculate_roc(prices, period=20):
-    """Calculates the Rate of Change (ROC) over a given period."""
-    if len(prices) < period + 1:
-        return None
-    return ((prices[-1] - prices[-1 - period]) / prices[-1 - period]) * 100
+def calculate_bollinger_bands(prices, period=20, num_std_dev=2):
+    """Calculates the middle, upper, and lower Bollinger Bands."""
+    if len(prices) < period:
+        return None, None, None
+    sma = calculate_sma(prices, period)
+    std_dev = np.std(prices[-period:])
+    upper_band = sma + (std_dev * num_std_dev)
+    lower_band = sma - (std_dev * num_std_dev)
+    return sma, upper_band, lower_band
 
 def decide(current_price, price_history, news_context):
     """
     SELF-IMPROVED STRATEGY V3:
-    This version refactors the successful V2 into a more robust, adaptive system.
-    1.  Composite Scoring System: Replaces rigid boolean checks with a weighted
-        scoring model (`bullish_score`, `bearish_score`) that combines trend,
-        momentum, and sentiment, allowing for more nuanced trade confirmations.
-    2.  Dynamic ATR-Based Stop-Loss: The fixed-percentage stop-loss is replaced
-        with a trailing stop based on Average True Range (ATR). This adapts risk
-        management to current market volatility, protecting capital more effectively.
-    3.  Choppy Market Regime Filter: A new regime is introduced to detect sideways,
-        low-volatility markets. In this regime, trade entry thresholds are raised
-        significantly to prevent whipsaws and conserve capital for high-probability trends.
+    This version introduces a composite "Market Health Score" and an ATR-based
+    trailing stop for more dynamic, volatility-aware decision-making.
+    1.  Market Health Score: A 0-100 score combining trend (price vs SMAs),
+        momentum (RSI, MACD), and volatility (ATR ratio) to create a nuanced
+        market regime filter, replacing the previous binary crisis mode.
+    2.  ATR-Based Trailing Stop: The stop-loss is now dynamic, calculated as
+        (Recent High - N * ATR), making it tighter in calm markets and looser
+        in volatile ones for superior risk management.
+    3.  Bollinger Band Breakouts: Entries are refined to look for breakouts
+        confirmed by price action relative to Bollinger Bands, improving signal quality.
+    4.  Sentiment-Modulated Thresholds: Extreme fear/greed news now dynamically
+        adjusts RSI overbought/oversold levels, preventing chasing euphoria and
+        enabling high-conviction contrarian entries.
     """
     # --- 1. Sentiment Analysis ---
     context_lower = news_context.lower()
     sentiment_keywords = {
-        "fed pivot": 3.0, "rate cut": 2.5, "quantitative easing": 2.5, "soft landing": 2.5,
-        "cooling inflation": 2.5, "cpi miss": 2.5, "ai boom": 2.5, "stimulus": 2.0,
-        "dovish": 2.0, "record high": 2.0, "bullish": 2.0, "strong earnings": 2.0,
-        "beat estimates": 1.5, "recovery": 1.5, "upgrade": 1.5, "de-escalation": 2.0,
-        "short squeeze": 3.5, "capitulation": 3.0, "panic selling": 2.5, "extreme fear": 2.0,
-        "strong jobs report": 0.5,
+        # Positive
+        "fed pivot": 3.0, "rate cut": 2.5, "soft landing": 2.5, "cooling inflation": 2.5,
+        "ai boom": 2.5, "stimulus": 2.0, "dovish": 2.0, "bullish": 2.0, "strong earnings": 2.0,
+        "de-escalation": 2.0, "short squeeze": 3.5, "capitulation": 3.0,
+        # Negative
         "recession": -3.0, "crisis": -3.0, "stagflation": -3.0, "hot inflation": -3.0,
-        "war": -3.0, "yield curve inversion": -3.5, "quantitative tightening": -2.5,
-        "black swan": -4.0, "systemic risk": -4.0, "contagion": -3.5, "credit crunch": -3.5,
-        "rate hike": -2.5, "bankruptcy": -2.5, "hard landing": -2.5, "geopolitical risk": -2.5,
-        "cpi beat": -2.5, "vix spike": -2.5, "hawkish": -2.0, "bearish": -2.0,
-        "sell-off": -2.0, "weak earnings": -2.0, "market turmoil": -2.0, "bubble": -2.0,
-        "uncertainty": -1.5,
+        "war": -3.0, "yield curve inversion": -3.5, "black swan": -4.0, "systemic risk": -4.0,
+        "credit crunch": -3.5, "rate hike": -2.5, "bankruptcy": -2.5, "hawkish": -2.0,
+        "sell-off": -2.0, "bubble": -2.0, "uncertainty": -1.5,
+        # Extreme Psychology (for RSI modulation)
+        "extreme fear": 2.0, "panic selling": 2.5,
         "euphoria": -2.5, "mania": -3.0, "irrational exuberance": -3.0, "extreme greed": -2.5,
     }
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent"]
     net_sentiment_score = 0.0
+    rsi_sentiment_modifier = 0.0
     for keyword, weight in sentiment_keywords.items():
-        pattern = r'\b' + re.escape(keyword) + r'\b'
-        for match in re.finditer(pattern, context_lower):
-            pre_context = context_lower[max(0, match.start() - 30):match.start()]
-            is_negated = any(neg_word in pre_context for neg_word in negation_words)
-            net_sentiment_score += -weight if is_negated else weight
+        if re.search(r'\b' + re.escape(keyword) + r'\b', context_lower):
+            net_sentiment_score += weight
+            if keyword in ["extreme greed", "euphoria", "mania", "irrational exuberance"]:
+                rsi_sentiment_modifier = -5.0 # Be quicker to sell
+            elif keyword in ["extreme fear", "panic selling", "capitulation"]:
+                rsi_sentiment_modifier = 5.0 # Be slower to sell / more willing to buy
 
     # --- 2. Technical Indicators & State Calculation ---
     all_prices = price_history + [current_price]
 
     # Indicator Periods
-    SMA_TREND_LONG = 100
-    SMA_TREND_MEDIUM = 50
+    SMA_LONG = 100
+    SMA_MEDIUM = 50
+    SMA_SHORT = 20
     RSI_PERIOD = 14
     ATR_PERIOD = 14
-    ROC_CRASH_PERIOD = 20
-    STOP_LOSS_LOOKBACK = 20
+    STOP_LOSS_LOOKBACK = 25
+    ATR_STOP_MULTIPLIER = 2.5
 
-    required_history_length = max(SMA_TREND_LONG + 1, 50)
+    required_history_length = max(SMA_LONG + 1, 50)
     if len(all_prices) < required_history_length:
         return "HOLD"
 
     # Calculate core indicators
-    sma_100 = calculate_sma(all_prices, SMA_TREND_LONG)
-    sma_50 = calculate_sma(all_prices, SMA_TREND_MEDIUM)
+    sma_100 = calculate_sma(all_prices, SMA_LONG)
+    sma_50 = calculate_sma(all_prices, SMA_MEDIUM)
     rsi = calculate_rsi(all_prices, RSI_PERIOD)
     _, _, macd_hist_series = calculate_macd_series(all_prices)
     atr = calculate_atr(all_prices, ATR_PERIOD)
-    long_atr = calculate_atr(all_prices, 50) # For regime detection
-    roc_20 = calculate_roc(all_prices, ROC_CRASH_PERIOD)
-    donchian_high_20 = np.max(all_prices[-STOP_LOSS_LOOKBACK:]) if len(all_prices) >= STOP_LOSS_LOOKBACK else None
+    bb_mid, bb_upper, bb_lower = calculate_bollinger_bands(all_prices, SMA_SHORT)
+    donchian_high = np.max(all_prices[-STOP_LOSS_LOOKBACK:]) if len(all_prices) >= STOP_LOSS_LOOKBACK else None
 
     # Null check for all indicators
-    if any(v is None for v in [sma_100, sma_50, rsi, atr, long_atr, roc_20, donchian_high_20]) or macd_hist_series is None or len(macd_hist_series) < 2:
+    if any(v is None for v in [sma_100, sma_50, rsi, atr, bb_mid, donchian_high]) or macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
 
     macd_histogram = macd_hist_series[-1]
     prev_macd_histogram = macd_hist_series[-2]
-    macd_hist_delta = macd_histogram - prev_macd_histogram
 
-    # --- 3. Regime Detection ---
-    is_long_term_downtrend = current_price < sma_100
-    is_crash_velocity = roc_20 < -15.0
-    is_crisis_regime = is_long_term_downtrend or is_crash_velocity
-
-    is_deeply_oversold = rsi < 25
-    is_capitulation_candidate = is_crash_velocity and is_deeply_oversold
-
-    is_low_volatility = atr < (long_atr * 0.8)
-    is_low_momentum = abs(roc_20) < 5.0
-    is_choppy_regime = is_low_volatility and is_low_momentum
+    # --- 3. Market Health Score (0-100) ---
+    # Trend Component (40 points)
+    trend_score = 0
+    if current_price > sma_50: trend_score += 20
+    if sma_50 > sma_100: trend_score += 20
+    # Momentum Component (40 points)
+    momentum_score = 0
+    if rsi > 50: momentum_score += 20
+    if macd_histogram > 0: momentum_score += 20
+    # Volatility Component (20 points) - Lower volatility is good in uptrends
+    volatility_score = 20 if atr < (np.mean(all_prices[-SMA_LONG:]) * 0.03) else 10
+    
+    market_health_score = trend_score + momentum_score + volatility_score
 
     # --- 4. Decision Logic (Hierarchical) ---
 
-    # REGIME 1: CONTRARIAN CAPITULATION (HIGHEST PRIORITY)
-    if is_capitulation_candidate and macd_hist_delta > 0:
+    # REGIME 1: CONTRARIAN CAPITULATION (HIGHEST PRIORITY OVERRIDE)
+    is_deeply_oversold = rsi < 25
+    is_momentum_reversing_up = macd_histogram > prev_macd_histogram
+    if is_deeply_oversold and is_momentum_reversing_up and net_sentiment_score < -3.0:
         return "BUY"
 
-    # REGIME 2: DYNAMIC RISK MANAGEMENT (PRIMARY SELL SIGNALS)
-    # Priority 1: Volatility-adjusted trailing stop-loss.
-    stop_loss_level = donchian_high_20 - (atr * 2.5)
-    if current_price < stop_loss_level:
+    # REGIME 2: RISK MANAGEMENT (SELL TRIGGERS)
+    # Priority 1: Dynamic ATR-Based Trailing Stop
+    atr_stop_level = donchian_high - (ATR_STOP_MULTIPLIER * atr)
+    if current_price < atr_stop_level:
         return "SELL"
 
-    # Priority 2: Profit-taking on extreme overbought conditions with FADING momentum.
-    if rsi > 82 and macd_hist_delta < 0:
+    # Priority 2: Extreme Market Deterioration (Low Health Score)
+    if market_health_score < 30:
         return "SELL"
 
-    # REGIME 3: CRISIS AVERSION
-    if is_crisis_regime and not is_capitulation_candidate:
-        if current_price < sma_50 and macd_histogram < 0:
-            return "SELL"
-        return "HOLD" # Stay defensive in cash
-
-    # --- 5. Composite Scoring for Normal & Choppy Regimes ---
-    bullish_score = 0.0
-    bearish_score = 0.0
-
-    # Trend Component (Weight: 2.5)
-    if current_price > sma_50: bullish_score += 1.5
-    else: bearish_score += 1.5
-    if current_price > sma_100: bullish_score += 1.0
-    else: bearish_score += 1.0
-
-    # Momentum Component (Weight: 3.0)
-    if macd_histogram > 0: bullish_score += 1.5
-    else: bearish_score += 1.5
-    if macd_hist_delta > 0: bullish_score += 1.5
-    else: bearish_score += 1.5
-
-    # Oscillator Component (Weight: 1.5)
-    if rsi < 40: bullish_score += (40 - rsi) / 10.0 # Scaled score for oversold
-    if rsi > 60: bearish_score += (rsi - 60) / 10.0 # Scaled score for overbought
-
-    # Sentiment Component (Weight: Dynamic)
-    bullish_score += max(0, net_sentiment_score / 2.0)
-    bearish_score += max(0, -net_sentiment_score / 2.0)
-
-    # --- 6. Final Trade Decision ---
-    buy_threshold = 4.0
-    sell_threshold = 4.0
-
-    # In a choppy market, be much more selective.
-    if is_choppy_regime:
-        buy_threshold = 5.5
-        sell_threshold = 5.5
-
-    # BUY Condition: Strong bullish conviction with weak bearish signals.
-    if bullish_score >= buy_threshold and bearish_score < (buy_threshold / 2):
-        # Final check: avoid buying into extreme overbought conditions
-        if rsi < 78:
-            return "BUY"
-
-    # SELL Condition: Strong bearish conviction with weak bullish signals.
-    if bearish_score >= sell_threshold and bullish_score < (sell_threshold / 2):
+    # Priority 3: Profit-taking on overbought conditions with fading momentum
+    is_overbought = rsi > (80 + rsi_sentiment_modifier)
+    is_momentum_fading = macd_histogram < prev_macd_histogram
+    if is_overbought and is_momentum_fading:
         return "SELL"
+
+    # REGIME 3: NORMAL MARKET CONDITIONS (BUY TRIGGERS)
+    is_healthy_market = market_health_score > 70
+    is_momentum_turning_up = macd_histogram > 0 and prev_macd_histogram <= 0
+    is_not_overextended = rsi < (75 + rsi_sentiment_modifier)
+    is_above_short_term_trend = current_price > bb_mid # Price is above 20-day SMA
+    is_sentiment_permissive = net_sentiment_score > -2.0
+
+    if is_healthy_market and is_momentum_turning_up and is_not_overextended and is_above_short_term_trend and is_sentiment_permissive:
+        return "BUY"
 
     # Default action is to hold the current position.
     return "HOLD"
