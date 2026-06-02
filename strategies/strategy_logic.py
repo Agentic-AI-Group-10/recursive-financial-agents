@@ -136,7 +136,7 @@ def calculate_sentiment_score(news_context):
         "valuation peak": -2.8, "valuation trough": 2.8, "liquidity contraction": -2.7,
         "portfolio concentration": -1.8, "risk parity": 1.9
     }
-    negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent", "unlikely", "avoid", "no signs of", "unlikely to", "lack", "absence", "never", "none", "neglect", "without", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "never again", "no longer", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "without any", "lack any", "fail any", "struggle any", "prevent any", "avoid any", "unlikely any", "neglect any"]
+    negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent", "unlikely", "avoid", "no signs of", "unlikely to", "lack", "absence", "never", "none", "neglect", "without", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "never again", "no longer", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "without any", "lack any", "fail any", "struggle any", "prevent any", "avoid any", "unlikely any", "neglect any", "no longer any", "lack of any", "fail of any", "struggle of any", "prevent of any", "avoid of any", "unlikely of any", "neglect of any"]
     net_sentiment_score = 0.0
     for keyword, weight in sentiment_keywords.items():
         pattern = r'(?<!\S)(?i)' + re.escape(keyword) + r'(?!\S)'
@@ -147,7 +147,7 @@ def calculate_sentiment_score(news_context):
             if any(neg_word in post_context for neg_word in negation_words):
                 is_negated = not is_negated
             if is_negated:
-                weight *= 0.15  # Reduced impact for negated terms
+                weight *= 0.1  # Reduced impact for negated terms
             net_sentiment_score += -weight if is_negated else weight
     return net_sentiment_score
 
