@@ -102,6 +102,19 @@ def calculate_keltner_channel(prices, period=20):
     lower_band = sma - (atr * 2)
     return upper_band, lower_band
 
+def calculate_obv(prices):
+    if len(prices) < 2:
+        return None
+    obv = np.zeros(len(prices))
+    for i in range(1, len(prices)):
+        if prices[i] > prices[i-1]:
+            obv[i] = obv[i-1] + 1
+        elif prices[i] < prices[i-1]:
+            obv[i] = obv[i-1] - 1
+        else:
+            obv[i] = obv[i-1]
+    return obv[-1]
+
 def calculate_sentiment_score(news_context):
     context_lower = news_context.lower()
     sentiment_keywords = {
@@ -134,7 +147,7 @@ def calculate_sentiment_score(news_context):
         "economic resilience": 2.5, "policy support": 2.6, "market confidence": 2.2,
         "bullish momentum": 2.4, "bearish momentum": -2.4, "market breadth contraction": -1.7,
         "valuation peak": -2.8, "valuation trough": 2.8, "liquidity contraction": -2.7,
-        "portfolio concentration": -1.8, "risk parity": 1.9
+        "portfolio concentration": -1.8, "risk parity": 1.9, "market rebound potential": 2.8
     }
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent", "unlikely", "avoid", "no signs of", "unlikely to", "lack", "absence", "never", "none", "neglect", "without", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "never again", "no longer", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "without any", "lack any", "fail any", "struggle any", "prevent any", "avoid any", "unlikely any", "neglect any"]
     net_sentiment_score = 0.0
@@ -147,7 +160,7 @@ def calculate_sentiment_score(news_context):
             if any(neg_word in post_context for neg_word in negation_words):
                 is_negated = not is_negated
             if is_negated:
-                weight *= 0.05  # Increased negation penalty
+                weight *= 0.03  # Increased negation penalty
             net_sentiment_score += -weight if is_negated else weight
     return net_sentiment_score
 
@@ -181,9 +194,10 @@ def decide(current_price, price_history, news_context):
     stochastic_oscillator = calculate_stochastic_oscillator(all_prices)
     keltner_upper_band, keltner_lower_band = calculate_keltner_channel(all_prices)
     bollinger_upper, bollinger_lower, bollinger_sma = calculate_bollinger_bands(all_prices)
+    obv = calculate_obv(all_prices)
 
     if any(v is None for v in [sma_50, ema_12, ema_26, ema_9, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, stochastic_oscillator]) or \
-       macd_hist_series is None or len(macd_hist_series) < 2 or bollinger_upper is None:
+       macd_hist_series is None or len(macd_hist_series) < 2 or bollinger_upper is None or obv is None:
         return "HOLD"
 
     macd_histogram = macd_hist_series[-1]
@@ -202,7 +216,7 @@ def decide(current_price, price_history, news_context):
     is_extreme_crash_velocity = roc_20 < -18.0
     is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold and current_price < donchian_low_30 and (short_atr > long_atr * 1.2) and current_price < keltner_lower_band
 
-    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 15 and ema_12 > ema_26 and sentiment_score > -1.5 and macd_hist_acceleration > 0 and signal_line[-1] < macd_histogram:
+    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 15 and ema_12 > ema_26 and sentiment_score > -1.5 and macd_hist_acceleration > 0 and signal_line[-1] < macd_histogram and obv > 0:
         return "BUY"
 
     if is_crisis_regime:
@@ -228,13 +242,13 @@ def decide(current_price, price_history, news_context):
     is_primary_downtrend = current_price < sma_50
     is_momentum_confirming_down = macd_histogram < 0 and prev_macd_histogram >= 0
     is_sentiment_permissive_for_sell = sentiment_score < 2.0
-    if is_primary_downtrend and is_momentum_confirming_down and is_sentiment_permissive_for_sell:
+    if is_primary_downtrend and is_momentum_confirming_down and is_sentiment_permissive_for_sell and obv < 0:
         return "SELL"
 
     is_momentum_fading = macd_hist_delta < 0
     overbought_threshold = 85 if is_high_volatility else 82
     is_extremely_overbought = rsi > overbought_threshold
-    if is_extremely_overbought and is_momentum_fading:
+    if is_extremely_overbought and is_momentum_fading and obv < 0:
         return "SELL"
 
     is_primary_uptrend = current_price > sma_50 and (sma_200 is None or current_price > sma_200)
@@ -246,7 +260,7 @@ def decide(current_price, price_history, news_context):
     is_ema_crossover = ema_12 is not None and ema_26 is not None and ema_12 > ema_26
     is_bollinger_in_range = current_price > bollinger_lower and current_price < bollinger_upper
 
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_keltner_channel and is_bollinger_in_range and stochastic_oscillator > 30 and is_ema_crossover and macd_hist_acceleration > 0:
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_keltner_channel and is_bollinger_in_range and stochastic_oscillator > 30 and is_ema_crossover and macd_hist_acceleration > 0 and obv > 0:
         return "BUY"
 
     return "HOLD"
