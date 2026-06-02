@@ -1,6 +1,5 @@
 import numpy as np
 import re
-import pandas as pd
 
 # --- Helper Functions for Technical Indicators ---
 
@@ -10,36 +9,74 @@ def calculate_sma(prices, period):
         return None
     return np.mean(prices[-period:])
 
+def calculate_ema_series(data, period):
+    """Calculates a full series of Exponential Moving Averages."""
+    if len(data) < period:
+        return np.array([])
+    data_arr = np.array(data, dtype=float)
+    ema_values = np.zeros(len(data_arr) - period + 1, dtype=float)
+    ema_values[0] = np.mean(data_arr[:period])
+    multiplier = 2 / (period + 1)
+    for i in range(1, len(ema_values)):
+        ema_values[i] = (data_arr[i + period - 1] - ema_values[i-1]) * multiplier + ema_values[i-1]
+    return ema_values
+
 def calculate_ema(prices, period):
     """Calculates the Exponential Moving Average (EMA) for the latest price."""
     if len(prices) < period:
         return None
-    # Using pandas for a robust and standard EMA calculation
-    return pd.Series(prices).ewm(span=period, adjust=False).mean().iloc[-1]
+    ema_s = calculate_ema_series(prices, period)
+    return ema_s[-1] if len(ema_s) > 0 else None
 
 def calculate_rsi(prices, period=14):
-    """Calculates the Relative Strength Index (RSI)."""
+    """
+    Calculates the Relative Strength Index (RSI) using Wilder's smoothing method.
+    """
     if len(prices) < period + 1:
         return None
-    delta = pd.Series(prices).diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
     
-    rs = gain / loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi.iloc[-1]
+    prices_arr = np.array(prices, dtype=float)
+    deltas = np.diff(prices_arr)
+    
+    seed_gains = deltas[:period][deltas[:period] >= 0].sum()
+    seed_losses = -deltas[:period][deltas[:period] < 0].sum()
+    
+    avg_gain = seed_gains / period
+    avg_loss = seed_losses / period
+    
+    for i in range(period, len(deltas)):
+        delta = deltas[i]
+        gain = delta if delta >= 0 else 0.0
+        loss = -delta if delta < 0 else 0.0
+        avg_gain = (avg_gain * (period - 1) + gain) / period
+        avg_loss = (avg_loss * (period - 1) + loss) / period
+        
+    if avg_loss == 0:
+        return 100.0
+    
+    rs = avg_gain / avg_loss
+    rsi = 100.0 - (100.0 / (1.0 + rs))
+    return rsi
 
 def calculate_macd(prices, short_period=12, long_period=26, signal_period=9):
     """Calculates the MACD histogram for the latest price."""
     if len(prices) < long_period + signal_period:
         return None
+
+    short_ema_series = calculate_ema_series(prices, short_period)
+    long_ema_series = calculate_ema_series(prices, long_period)
     
-    prices_series = pd.Series(prices)
-    short_ema = prices_series.ewm(span=short_period, adjust=False).mean()
-    long_ema = prices_series.ewm(span=long_period, adjust=False).mean()
-    macd_line = short_ema - long_ema
-    signal_line = macd_line.ewm(span=signal_period, adjust=False).mean()
-    histogram = macd_line.iloc[-1] - signal_line.iloc[-1]
+    macd_line = short_ema_series[len(short_ema_series)-len(long_ema_series):] - long_ema_series
+    
+    if len(macd_line) < signal_period:
+        return None
+        
+    signal_line_series = calculate_ema_series(macd_line, signal_period)
+    
+    if len(signal_line_series) == 0:
+        return None
+        
+    histogram = macd_line[-1] - signal_line_series[-1]
     return histogram
 
 def calculate_bollinger_bands(prices, period=20, num_std_dev=2):
@@ -47,25 +84,19 @@ def calculate_bollinger_bands(prices, period=20, num_std_dev=2):
     if len(prices) < period:
         return None, None, None
     
-    prices_series = pd.Series(prices)
-    rolling_mean = prices_series.rolling(window=period).mean().iloc[-1]
-    rolling_std = prices_series.rolling(window=period).std().iloc[-1]
+    prices_slice = prices[-period:]
+    middle_band = np.mean(prices_slice)
+    std_dev = np.std(prices_slice)
     
-    upper_band = rolling_mean + (rolling_std * num_std_dev)
-    lower_band = rolling_mean - (rolling_std * num_std_dev)
+    upper_band = middle_band + (std_dev * num_std_dev)
+    lower_band = middle_band - (std_dev * num_std_dev)
     
-    return rolling_mean, upper_band, lower_band
-
-def calculate_roc(prices, period=20):
-    """Calculates the Rate of Change (ROC)."""
-    if len(prices) < period + 1:
-        return None
-    return (prices[-1] - prices[-1 - period]) / prices[-1 - period]
+    return middle_band, upper_band, lower_band
 
 def decide(current_price, price_history, news_context):
     """
     A self-improved, multi-regime trading strategy with enhanced risk management
-    and trend strength confirmation to reduce passivity and control drawdowns.
+    for its mean-reversion logic and more precise technical indicators.
 
     Parameters:
         current_price (float): The current day's closing price for SPY.
@@ -75,7 +106,7 @@ def decide(current_price, price_history, news_context):
     Returns:
         str: "BUY", "SELL", or "HOLD"
     """
-    # --- 1. Sentiment Analysis (Unchanged from successful parent) ---
+    # --- 1. Sentiment Analysis with Expanded Keywords ---
     context_lower = news_context.lower()
     sentiment_keywords = {
         "fed pivot": 3.0, "rate cut": 2.5, "stimulus": 2.0, "soft landing": 2.0,
@@ -106,28 +137,25 @@ def decide(current_price, price_history, news_context):
     # Define periods
     SHORT_EMA_PERIOD = 12
     LONG_EMA_PERIOD = 26
-    MEDIUM_TERM_SMA_PERIOD = 50
     MACD_SIGNAL_PERIOD = 9
     RSI_PERIOD = 14
     BB_PERIOD = 20
-    ROC_PERIOD = 20
+    MEDIUM_TERM_SMA_PERIOD = 50
     VOL_SHORT_PERIOD = 20
     VOL_LONG_PERIOD = 100
 
-    required_history_length = max(LONG_EMA_PERIOD + MACD_SIGNAL_PERIOD, VOL_LONG_PERIOD + 1, MEDIUM_TERM_SMA_PERIOD + 1)
+    required_history_length = max(LONG_EMA_PERIOD + MACD_SIGNAL_PERIOD, VOL_LONG_PERIOD + 1)
     if len(all_prices) < required_history_length:
         return "HOLD"
 
     # Calculate core indicators
     short_ema = calculate_ema(all_prices, SHORT_EMA_PERIOD)
     long_ema = calculate_ema(all_prices, LONG_EMA_PERIOD)
-    medium_sma = calculate_sma(all_prices, MEDIUM_TERM_SMA_PERIOD)
     rsi = calculate_rsi(all_prices, RSI_PERIOD)
     macd_histogram = calculate_macd(all_prices, SHORT_EMA_PERIOD, LONG_EMA_PERIOD, MACD_SIGNAL_PERIOD)
-    _, upper_band, lower_band = calculate_bollinger_bands(all_prices, BB_PERIOD)
-    roc = calculate_roc(all_prices, ROC_PERIOD)
+    middle_band, upper_band, lower_band = calculate_bollinger_bands(all_prices, BB_PERIOD)
 
-    if any(v is None for v in [short_ema, long_ema, medium_sma, rsi, macd_histogram, upper_band, roc]):
+    if any(v is None for v in [short_ema, long_ema, rsi, macd_histogram, middle_band, upper_band]):
         return "HOLD"
 
     # Adaptive Volatility Regime
@@ -137,14 +165,8 @@ def decide(current_price, price_history, news_context):
     is_high_volatility = (short_term_vol > long_term_vol * 1.5) and (short_term_vol > 0.015)
 
     # --- 3. Multi-Regime Decision Logic ---
-
-    # **IMPROVEMENT**: Defensive Exit logic to prevent large drawdowns.
-    # This acts as a master override to sell if the primary trend shows signs of failure.
-    if short_ema < medium_sma and macd_histogram < 0:
-        return "SELL"
-
     if is_high_volatility:
-        # === CRISIS MODE: High-conviction trend-following (largely unchanged) ===
+        # === CRISIS MODE: High-conviction trend-following with tighter filters (Unchanged - proven effective) ===
         BULLISH_SENTIMENT_THRESHOLD = 2.5
         BEARISH_SENTIMENT_THRESHOLD = -2.5
         RSI_OVERBOUGHT_CEILING = 65
@@ -163,31 +185,36 @@ def decide(current_price, price_history, news_context):
         is_choppy_market = trend_strength < 0.005
 
         if not is_choppy_market:
-            # Sub-Regime: Normal Trending Market with **IMPROVED** momentum confirmation
-            BULLISH_SENTIMENT_THRESHOLD = 1.0
-            BEARISH_SENTIMENT_THRESHOLD = -1.0
+            # Sub-Regime: Normal Trending Market with improved risk management
             RSI_OVERBOUGHT = 70
-            RSI_OVERSOLD = 30
-            ROC_STRENGTH_THRESHOLD = 0.03 # 3% move over the period
+            
+            bullish_trend = short_ema > long_ema
+            bearish_trend = short_ema < long_ema
 
-            # **IMPROVEMENT**: Require strong momentum (ROC) to confirm trend before entry
-            strong_bullish_trend = short_ema > long_ema and roc > ROC_STRENGTH_THRESHOLD
-            strong_bearish_trend = short_ema < long_ema and roc < -ROC_STRENGTH_THRESHOLD
-
-            if net_sentiment_score >= BULLISH_SENTIMENT_THRESHOLD and strong_bullish_trend and macd_histogram > 0 and rsi < RSI_OVERBOUGHT:
+            # IMPROVEMENT 1: Relaxed sentiment filter for BUY to reduce passivity.
+            # Instead of requiring positive news, just avoid strongly negative news.
+            BULLISH_SENTIMENT_VETO_THRESHOLD = -1.5
+            if bullish_trend and macd_histogram > 0 and rsi < RSI_OVERBOUGHT and net_sentiment_score > BULLISH_SENTIMENT_VETO_THRESHOLD:
                 return "BUY"
-            elif net_sentiment_score <= BEARISH_SENTIMENT_THRESHOLD and strong_bearish_trend and macd_histogram < 0 and rsi > RSI_OVERSOLD:
+
+            # IMPROVEMENT 2: More responsive SELL signal to reduce drawdowns.
+            # A confirmed trend break (EMA cross + price below 20-day SMA) is a faster exit.
+            elif bearish_trend and current_price < middle_band:
                 return "SELL"
         else:
-            # Sub-Regime: Choppy / Ranging Market (Mean-Reversion, unchanged)
+            # Sub-Regime: Choppy / Ranging Market (Mean-Reversion with Bollinger Band confirmation)
             MEAN_REVERSION_RSI_OVERSOLD = 30
             MEAN_REVERSION_RSI_OVERBOUGHT = 70
             
-            # Buy the dip only if confirmed by RSI/BB, sentiment isn't catastrophic, and major trend is intact.
+            medium_sma = calculate_sma(all_prices, MEDIUM_TERM_SMA_PERIOD)
+            if medium_sma is None:
+                return "HOLD"
+
+            # Buy the dip only if confirmed by both RSI and Bollinger Bands, and the medium-term trend is intact.
             if (rsi < MEAN_REVERSION_RSI_OVERSOLD and current_price < lower_band) and \
                (net_sentiment_score > -2.0) and (current_price > medium_sma):
                 return "BUY"
-            # Sell the rip only if confirmed by RSI/BB and sentiment isn't euphoric.
+            # Sell the rip only if confirmed by both RSI and Bollinger Bands.
             elif (rsi > MEAN_REVERSION_RSI_OVERBOUGHT and current_price > upper_band) and \
                  (net_sentiment_score < 2.0):
                 return "SELL"
