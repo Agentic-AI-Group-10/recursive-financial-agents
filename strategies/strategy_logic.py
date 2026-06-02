@@ -102,6 +102,20 @@ def calculate_keltner_channel(prices, period=20):
     lower_band = sma - (atr * 2)
     return upper_band, lower_band
 
+def calculate_obv(prices, volumes):
+    if len(prices) < 2 or len(volumes) < 2:
+        return None
+    obv = np.zeros(len(prices))
+    obv[0] = volumes[0]
+    for i in range(1, len(prices)):
+        if prices[i] > prices[i-1]:
+            obv[i] = obv[i-1] + volumes[i]
+        elif prices[i] < prices[i-1]:
+            obv[i] = obv[i-1] - volumes[i]
+        else:
+            obv[i] = obv[i-1]
+    return obv[-1]
+
 def calculate_sentiment_score(news_context):
     context_lower = news_context.lower()
     sentiment_keywords = {
