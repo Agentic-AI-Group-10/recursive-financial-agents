@@ -118,25 +118,12 @@ def decide(current_price, price_history, news_context):
     premature entries and stop-outs.
 
     Key Improvements:
-    1.  More Sensitive Dynamic Stop-Loss Trigger: The `is_high_volatility` threshold is
-        lowered (from 1.75 to 1.5) to trigger the wider 15% stop-loss more frequently
-        during volatile periods, providing more room for price swings and reducing
-        premature stop-outs.
-    2.  Earlier Capitulation Buy: The "Capitulation Buy" now requires `macd_hist_delta > 0`
-        and `macd_histogram > -0.5`. This allows for an earlier entry as MACD momentum
-        turns upward from deeply negative territory, rather than waiting for a full
-        cross above zero, aiming to capture the initial bounce.
-    3.  Earlier Crisis Recovery Buy: The "Post-Crisis Recovery Buy" logic is made
-        more permissive for earlier entry:
-        -   RSI threshold lowered from `> 40` to `> 35`.
-        -   MACD confirmation changed from `macd_histogram > 0` to `macd_hist_delta > 0`
-            for an earlier signal of upward momentum.
-        -   Sentiment threshold relaxed from `net_sentiment_score > -1.0` to `> -2.0`
-            to allow entries even with lingering negative sentiment during recovery.
-    4.  Maintains Robust Normal Regime Logic: The core trend-following and
-        momentum-based buy/sell signals, along with profit-taking in overbought
-        conditions, remain effective for stable market environments, which contributed
-        to strong performance in past runs.
+    1.  More Permissive Crisis Recovery/Capitulation Buys:
+        -   Capitulation Buy now triggers on `macd_hist_delta > 0` (improving momentum) and `rsi < 30` (deeply oversold but slightly less extreme), allowing earlier entry into potential bottoms.
+        -   Post-Crisis Recovery Buy now triggers on `macd_hist_delta > 0` and `rsi > 35` (recovering from oversold), aiming to capture earlier bounces.
+    2.  Wider Dynamic Stop-Loss for Extreme Volatility: The stop-loss is now even wider (20%) during periods of extreme volatility, providing more room for price swings and reducing premature stop-outs in highly turbulent markets.
+    3.  Sentiment Refinement: Neutralized "strong jobs report" sentiment to avoid ambiguity in varying macro environments.
+    4.  Maintains Robust Normal Regime Logic: The core trend-following and momentum-based buy/sell signals, along with profit-taking in overbought conditions, remain effective for stable market environments.
     """
     # --- 1. Sentiment Analysis ---
     context_lower = news_context.lower()
@@ -146,7 +133,7 @@ def decide(current_price, price_history, news_context):
         "dovish": 2.0, "record high": 2.0, "bullish": 2.0, "strong earnings": 2.0,
         "beat estimates": 1.5, "recovery": 1.5, "upgrade": 1.5, "de-escalation": 2.0,
         "short squeeze": 3.5, "capitulation": 3.0, "panic selling": 2.5, "extreme fear": 2.0,
-        "strong jobs report": 0.5, # Ambiguous: good for economy, bad for inflation/rates
+        "strong jobs report": 0.0, # Neutralized: good for economy, but can imply higher rates
         "recession": -3.0, "crisis": -3.0, "stagflation": -3.0, "hot inflation": -3.0,
         "war": -3.0, "yield curve inversion": -3.5, "quantitative tightening": -2.5,
         "black swan": -4.0, "systemic risk": -4.0, "contagion": -3.5, "credit crunch": -3.5,
@@ -203,36 +190,38 @@ def decide(current_price, price_history, news_context):
     macd_hist_delta = macd_histogram - prev_macd_histogram
 
     # --- 3. Regime Detection ---
+    # Volatility thresholds for adaptive stop-loss
+    is_high_volatility = short_atr > (long_atr * 1.75)
+    is_extreme_volatility = short_atr > (long_atr * 2.0) # New, higher threshold for extreme conditions
+
     # Crisis Regime: General high-risk environment
     is_long_term_downtrend = current_price < sma_100
-    # Adjusted volatility threshold for adaptive stop-loss (more sensitive)
-    is_high_volatility = short_atr > (long_atr * 1.5) 
     is_crash_velocity = roc_20 < -15.0
     is_crisis_regime = (is_long_term_downtrend and is_high_volatility) or is_crash_velocity
 
     # Capitulation Regime: An extreme subset of crisis, signaling a potential bottom
-    is_deeply_oversold = rsi < 25
+    is_deeply_oversold = rsi < 30 # Adjusted from 25 for earlier entry
     is_extreme_crash_velocity = roc_20 < -18.0
     is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold
 
     # --- 4. Decision Logic (Hierarchical) ---
 
     # REGIME 1: CONTRARIAN CAPITULATION (HIGHEST PRIORITY)
-    # Buy when there is blood in the streets, but only if momentum shows strong signs of turning.
-    # Modified for earlier MACD confirmation: histogram turning up from negative territory.
-    if is_capitulation_candidate and macd_hist_delta > 0 and macd_histogram > -0.5: 
+    # Buy when there is blood in the streets, but only if momentum shows signs of turning.
+    # Requires MACD histogram to be improving (delta > 0) for earlier confirmation.
+    if is_capitulation_candidate and macd_hist_delta > 0: # Adjusted for earlier momentum signal
         return "BUY"
 
     # REGIME 2: CRISIS AVERSION & RECOVERY (MODIFIED)
     # If in a general crisis (but not a specific capitulation buy signal), be defensive or seek recovery.
     if is_crisis_regime:
         # Stronger recovery signals: RSI bounced higher and MACD histogram turned positive.
-        # Modified for earlier RSI and MACD signals, and more permissive sentiment.
-        is_recovering_from_oversold = rsi > 35 and macd_hist_delta > 0 
+        # Adjusted RSI and MACD for earlier recovery signal.
+        is_recovering_from_oversold = rsi > 35 and macd_hist_delta > 0 # Adjusted RSI from 40, MACD from >0 to delta >0
         
         # NEW: Post-Crisis Recovery Buy - if in crisis but showing strong recovery and sentiment not utterly catastrophic
         # Requires less negative sentiment for recovery, balancing between permissive and restrictive.
-        if is_recovering_from_oversold and net_sentiment_score > -2.0: # Adjusted sentiment for recovery
+        if is_recovering_from_oversold and net_sentiment_score > -1.0: # Adjusted sentiment for recovery
             return "BUY"
         
         # Otherwise, if no recovery buy signal, remain defensive.
@@ -247,9 +236,11 @@ def decide(current_price, price_history, news_context):
 
     # --- SELL LOGIC (Risk Management First) ---
     # Priority 1: Dynamic Stop-Loss. Adjusted based on volatility and made wider.
-    base_stop_loss_factor = 0.88 # 12% drop (wider)
-    if is_high_volatility: # Triggered more easily now
-        stop_loss_factor = 0.85 # 15% drop during high volatility (wider)
+    base_stop_loss_factor = 0.88 # 12% drop
+    if is_extreme_volatility: # New extreme volatility condition
+        stop_loss_factor = 0.80 # 20% drop during extreme volatility
+    elif is_high_volatility:
+        stop_loss_factor = 0.85 # 15% drop during high volatility
     else:
         stop_loss_factor = base_stop_loss_factor
 
