@@ -97,6 +97,16 @@ def calculate_roc(prices, period=20):
         return 0.0
     return ((prices[-1] - prices[-1 - period]) / prices[-1 - period]) * 100
 
+def calculate_bollinger_bands(prices, period=20, std_dev=2):
+    """Calculates Bollinger Bands."""
+    if len(prices) < period:
+        return None, None
+    sma = calculate_sma(prices, period)
+    std = np.std(prices[-period:])
+    upper_band = sma + std_dev * std
+    lower_band = sma - std_dev * std
+    return upper_band, lower_band
+
 def decide(current_price, price_history, news_context):
     context_lower = news_context.lower()
     sentiment_keywords = {
@@ -148,8 +158,9 @@ def decide(current_price, price_history, news_context):
     long_atr = calculate_atr(all_prices, atr_long)
     roc_20 = calculate_roc(all_prices, roc_crash_period)
     donchian_high_30 = np.max(all_prices[-stop_loss_lookback:]) if len(all_prices) >= stop_loss_lookback else None
+    upper_band, lower_band = calculate_bollinger_bands(all_prices)
 
-    if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_30]) or \
+    if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_30, upper_band, lower_band]) or \
        macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
 
@@ -209,8 +220,9 @@ def decide(current_price, price_history, news_context):
     is_not_overbought = rsi < 78
     is_sentiment_permissive_for_buy = net_sentiment_score > -3.0
     is_sufficient_volatility = short_atr > (long_atr * 0.6) 
+    is_price_in_bollinger_band = current_price > lower_band and current_price < upper_band
 
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility:
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_bollinger_band:
         return "BUY"
 
     return "HOLD"
