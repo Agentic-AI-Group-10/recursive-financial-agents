@@ -103,17 +103,16 @@ def calculate_roc(prices, period=20):
 
 def decide(current_price, price_history, news_context):
     """
-    SELF-IMPROVED STRATEGY V4:
-    This version refines the strategy based on lessons from stress regimes:
-    1.  Adaptive Dynamic Stop-Loss: The stop-loss percentage is now dynamic,
-        widening from 8% to 10% during periods of high volatility (indicated by ATR).
-        This provides more room for price fluctuations in turbulent markets, reducing
-        premature stop-outs while maintaining disciplined risk management.
+    SELF-IMPROVED STRATEGY V5:
+    This version refines the strategy based on lessons from stress regimes, particularly
+    aiming to improve participation in V-shaped recoveries during crises.
+    1.  Adaptive Dynamic Stop-Loss: The stop-loss percentage is dynamic (8% to 10% based on ATR),
+        providing room for fluctuations while maintaining risk management. (Retained)
     2.  Nuanced Crisis Aversion: The "Crisis Aversion" logic is enhanced. While still
-        defensive, it now allows the strategy to HOLD (instead of automatically SELL)
-        if in a crisis regime but showing early signs of recovery (positive MACD
-        histogram delta and RSI bouncing from extreme lows). This aims to prevent
-        premature exits during potential V-shaped recoveries.
+        defensive, it now allows the strategy to BUY (instead of just HOLD) if in a crisis
+        regime but showing strong early signs of recovery (positive MACD histogram delta
+        and RSI bouncing from extreme lows), AND if sentiment is not catastrophically negative.
+        This aims to prevent missing V-shaped recovery entries.
     3.  Maintains Robust Normal Regime Logic: The core trend-following and
         momentum-based buy/sell signals, along with profit-taking in overbought
         conditions, remain effective for stable market environments. The capitulation
@@ -202,18 +201,23 @@ def decide(current_price, price_history, news_context):
     if is_capitulation_candidate and macd_hist_delta > 0:
         return "BUY"
 
-    # REGIME 2: CRISIS AVERSION (MODIFIED)
-    # If in a general crisis (but not a specific capitulation buy signal), be defensive.
+    # REGIME 2: CRISIS AVERSION & RECOVERY (MODIFIED)
+    # If in a general crisis (but not a specific capitulation buy signal), be defensive or seek recovery.
     if is_crisis_regime:
-        # NEW: If there are signs of short-term recovery within the crisis, HOLD instead of SELL.
         is_recovering_from_oversold = rsi > 30 and macd_hist_delta > 0
-        if is_recovering_from_oversold:
-            return "HOLD" # Don't sell prematurely during a potential V-shaped recovery.
         
-        # Otherwise, if no recovery signs, remain defensive.
+        # NEW: Post-Crisis Recovery Buy - if in crisis but showing strong recovery and sentiment not utterly catastrophic
+        # This allows the strategy to BUY into a V-shaped recovery, rather than just HOLDing.
+        if is_recovering_from_oversold and net_sentiment_score > -4.0: # Relaxed sentiment for recovery
+            return "BUY"
+        
+        # Otherwise, if no recovery buy signal, remain defensive.
+        # If conditions are still bearish, SELL.
         if macd_histogram < 0 or current_price < sma_50:
             return "SELL"
-        return "HOLD" # Hold cash and wait for the storm to pass, or hold existing position if conditions are not explicitly bearish.
+        
+        # If in crisis, but not bearish enough to sell, and not strong enough to buy, then HOLD.
+        return "HOLD"
 
     # REGIME 3: NORMAL MARKET CONDITIONS
 
