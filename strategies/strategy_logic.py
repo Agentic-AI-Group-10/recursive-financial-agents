@@ -134,16 +134,15 @@ def calculate_sentiment_score(news_context):
         "economic resilience": 2.5, "policy support": 2.6, "market confidence": 2.2,
         "bullish momentum": 2.4, "bearish momentum": -2.4, "market breadth contraction": -1.7,
         "valuation peak": -2.8, "valuation trough": 2.8, "liquidity contraction": -2.7,
-        "portfolio concentration": -1.8, "portfolio diversification": 1.8, "risk parity": 1.9,
-        "economic expansion": 2.1, "growth acceleration": 2.5, "policy uncertainty": -2.0
+        "portfolio concentration": -1.8, "risk parity": 1.9
     }
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent", "unlikely", "avoid", "no signs of", "unlikely to", "lack", "absence", "never", "none", "neglect", "without", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "never again", "no longer", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "without any", "lack any", "fail any", "struggle any", "prevent any", "avoid any", "unlikely any", "neglect any"]
     net_sentiment_score = 0.0
     for keyword, weight in sentiment_keywords.items():
         pattern = r'(?<!\S)(?i)' + re.escape(keyword) + r'(?!\S)'
         for match in re.finditer(pattern, context_lower):
-            pre_context = context_lower[max(0, match.start() - 150):match.start()]
-            post_context = context_lower[match.end():match.end() + 150]
+            pre_context = context_lower[max(0, match.start() - 200):match.start()]
+            post_context = context_lower[match.end():match.end() + 200]
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
             if any(neg_word in post_context for neg_word in negation_words):
                 is_negated = not is_negated
@@ -164,9 +163,9 @@ def decide(current_price, price_history, news_context):
     sma_50 = np.mean(all_prices[-50:])
     sma_200 = np.mean(all_prices[-200:]) if price_len >= 200 else None
     
-    ema_short = 5 if price_len < 30 else 12
-    ema_long = 10 if price_len < 30 else 26
-    ema_signal = 5 if price_len < 30 else 9
+    ema_short = 12 if price_len >= 30 else 8
+    ema_long = 26 if price_len >= 30 else 18
+    ema_signal = 9 if price_len >= 30 else 6
     
     ema_12 = calculate_ema_series(all_prices, ema_short)[-1] if price_len >= ema_short else None
     ema_26 = calculate_ema_series(all_prices, ema_long)[-1] if price_len >= ema_long else None
@@ -202,7 +201,7 @@ def decide(current_price, price_history, news_context):
     is_extreme_crash_velocity = roc_20 < -18.0
     is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold and current_price < donchian_low_30 and (short_atr > long_atr * 1.2) and current_price < keltner_lower_band
 
-    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 15 and ema_12 > ema_26 and sentiment_score > -1.5 and macd_hist_acceleration > 0:
+    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 15 and ema_12 > ema_26 and sentiment_score > -1.5 and macd_hist_acceleration > 0 and signal_line[-1] < macd_histogram:
         return "BUY"
 
     if is_crisis_regime:
