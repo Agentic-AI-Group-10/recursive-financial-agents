@@ -17,6 +17,15 @@ def calculate_ema_series(data, period):
                 ema_values[i] = (data_arr[i + period - 1] - ema_values[i-1]) * multiplier + ema_values[i-1]
         return ema_values
 
+def calculate_bollinger_bands(prices, period=20):
+    if len(prices) < period:
+        return None, None, None
+    sma = np.mean(prices[-period:])
+    std = np.std(prices[-period:])
+    upper = sma + (std * 2)
+    lower = sma - (std * 2)
+    return upper, lower, sma
+
 def calculate_macd_series(prices, short_period=12, long_period=26, signal_period=9):
     if len(prices) < long_period: 
         return None, None, None
@@ -101,26 +110,26 @@ def calculate_sentiment_score(news_context):
         "dovish": 2.2, "record high": 2.1, "bullish": 2.1, "strong earnings": 2.1,
         "beat estimates": 1.6, "recovery": 1.6, "upgrade": 1.6, "de-escalation": 2.2,
         "short squeeze": 3.8, "capitulation": 3.3, "panic selling": 2.7, "extreme fear": 2.2,
-        "strong jobs report": 2.0,  # Adjusted from -0.4 to +2.0
-        "recession": -3.2, "crisis": -3.2, "stagflation": -3.1, "hot inflation": -3.1,
-        "war": -3.2, "yield curve inversion": -3.6, "quantitative tightening": -2.6,
+        "strong jobs report": 2.0, "recession": -3.2, "crisis": -3.2, "stagflation": -3.1,
+        "hot inflation": -3.1, "war": -3.2, "yield curve inversion": -3.6, "quantitative tightening": -2.6,
         "black swan": -4.2, "systemic risk": -4.2, "contagion": -3.6, "credit crunch": -3.6,
         "rate hike": -2.6, "bankruptcy": -2.6, "hard landing": -2.6, "geopolitical risk": -2.6,
         "cpi beat": -2.6, "vix spike": -2.6, "hawkish": -2.1, "bearish": -2.1,
         "sell-off": -2.1, "weak earnings": -2.1, "market turmoil": -2.1, "bubble": -2.1,
         "economic slowdown": -2.1, "market correction": -2.1, "regime shift": -3.2,
-        "uncertainty": -1.6,
-        "euphoria": -2.6, "mania": -3.2, "irrational exuberance": -3.2, "extreme greed": -2.6,
-        "market rebound": 2.7, "rebound potential": 2.2, "safe haven": 1.6,
-        "economic recovery": 2.2, "bull market": 2.2, "bear market": -2.2,
-        "inflation concerns": -1.1, "deflation risk": -2.2, "market breadth": 1.1,
-        "geopolitical stability": 2.2, "market resilience": 2.2,
+        "uncertainty": -1.6, "euphoria": -2.6, "mania": -3.2, "irrational exuberance": -3.2,
+        "extreme greed": -2.6, "market rebound": 2.7, "rebound potential": 2.2, "safe haven": 1.6,
+        "economic recovery": 2.2, "bull market": 2.2, "bear market": -2.2, "inflation concerns": -1.1,
+        "deflation risk": -2.2, "market breadth": 1.1, "geopolitical stability": 2.2, "market resilience": 2.2,
         "central bank intervention": 2.8, "monetary easing": 2.6, "fiscal stimulus": 2.4,
         "market rotation": 1.8, "risk on": 2.3, "risk off": -2.3, "safe haven demand": 2.0,
         "economic expansion": 2.1, "growth acceleration": 2.5, "policy uncertainty": -2.0,
-        "sector rotation": 1.9, "valuation expansion": 1.7, "valuation contraction": -1.7
+        "sector rotation": 1.9, "valuation expansion": 1.7, "valuation contraction": -1.7,
+        "market breadth expansion": 1.8, "liquidity surge": 2.4, "portfolio rebalancing": 1.5,
+        "technical breakout": 2.3, "short covering": 2.5, "liquidity crunch": -2.8,
+        "margin squeeze": -2.7, "deleveraging": -2.5, "credit expansion": 2.3
     }
-    negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent", "unlikely", "avoid", "no signs of", "unlikely to", "lack", "absence", "never", "none", "neglect", "without", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "never again", "no longer", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect"]
+    negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent", "unlikely", "avoid", "no signs of", "unlikely to", "lack", "absence", "never", "none", "neglect", "without", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "never again", "no longer", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "without any", "lack any", "fail any", "struggle any", "prevent any", "avoid any", "unlikely any", "neglect any"]
     net_sentiment_score = 0.0
     for keyword, weight in sentiment_keywords.items():
         pattern = r'(?<!\S)(?i)' + re.escape(keyword) + r'(?!\S)'
@@ -131,7 +140,7 @@ def calculate_sentiment_score(news_context):
             if any(neg_word in post_context for neg_word in negation_words):
                 is_negated = not is_negated
             if is_negated:
-                weight *= 0.2
+                weight *= 0.1
             net_sentiment_score += -weight if is_negated else weight
     return net_sentiment_score
 
@@ -163,9 +172,10 @@ def decide(current_price, price_history, news_context):
     donchian_high_30, donchian_low_30 = calculate_donchian_channel(all_prices, 30)
     stochastic_oscillator = calculate_stochastic_oscillator(all_prices)
     keltner_upper_band, keltner_lower_band = calculate_keltner_channel(all_prices)
+    bollinger_upper, bollinger_lower, bollinger_sma = calculate_bollinger_bands(all_prices)
 
     if any(v is None for v in [sma_50, ema_12, ema_26, ema_9, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, stochastic_oscillator]) or \
-       macd_hist_series is None or len(macd_hist_series) < 2:
+       macd_hist_series is None or len(macd_hist_series) < 2 or bollinger_upper is None:
         return "HOLD"
 
     macd_histogram = macd_hist_series[-1]
@@ -202,7 +212,7 @@ def decide(current_price, price_history, news_context):
     else:
         stop_loss_factor = base_stop_loss_factor
 
-    if current_price < (donchian_high_30 * stop_loss_factor) and current_price < keltner_upper_band:
+    if current_price < (donchian_high_30 * stop_loss_factor) and current_price < keltner_upper_band and current_price < bollinger_upper:
         return "SELL"
 
     is_primary_downtrend = current_price < sma_50
@@ -224,8 +234,9 @@ def decide(current_price, price_history, news_context):
     is_sufficient_volatility = short_atr > (long_atr * 0.6)
     is_price_in_keltner_channel = current_price > keltner_lower_band and current_price < keltner_upper_band
     is_ema_crossover = ema_12 is not None and ema_26 is not None and ema_12 > ema_26
+    is_bollinger_in_range = current_price > bollinger_lower and current_price < bollinger_upper
 
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_keltner_channel and stochastic_oscillator > 30 and is_ema_crossover:
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_keltner_channel and is_bollinger_in_range and stochastic_oscillator > 30 and is_ema_crossover:
         return "BUY"
 
     return "HOLD"
