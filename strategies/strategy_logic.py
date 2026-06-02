@@ -172,6 +172,24 @@ def calculate_ichimoku(prices, conversion_period=9, base_period=26, leading_span
     lagging_span = prices_arr[-lagging_span_period]
     return conversion_line, base_line, leading_span_a, leading_span_b, lagging_span
 
+def calculate_adx(prices, period=14):
+    if len(prices) < period + 1:
+        return None
+    prices_arr = np.array(prices, dtype=float)
+    plus_dm = np.zeros(len(prices_arr) - 1)
+    minus_dm = np.zeros(len(prices_arr) - 1)
+    for i in range(1, len(prices_arr)):
+        high_diff = prices_arr[i] - prices_arr[i-1]
+        plus_dm[i-1] = high_diff if high_diff > 0 else 0
+        minus_dm[i-1] = -high_diff if high_diff < 0 else 0
+    plus_ema = calculate_ema_series(plus_dm, period)
+    minus_ema = calculate_ema_series(minus_dm, period)
+    if len(plus_ema) == 0 or len(minus_ema) == 0:
+        return None
+    dx = (plus_ema - minus_ema) / (plus_ema + minus_ema)
+    adx = calculate_ema_series(np.abs(dx), period)
+    return adx[-1] if len(adx) > 0 else None
+
 def decide(current_price, price_history, news_context):
     context_lower = news_context.lower()
     sentiment_score = calculate_sentiment_score(news_context)
@@ -204,8 +222,9 @@ def decide(current_price, price_history, news_context):
     keltner_upper_band, keltner_lower_band = calculate_keltner_channel(all_prices)
     bollinger_upper, bollinger_lower, bollinger_sma = calculate_bollinger_bands(all_prices)
     ichimoku_conversion, ichimoku_base, ichimoku_a, ichimoku_b, ichimoku_lagging = calculate_ichimoku(all_prices)
+    adx_value = calculate_adx(all_prices)
 
-    if any(v is None for v in [sma_50, ema_12, ema_26, ema_9, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, stochastic_oscillator]) or \
+    if any(v is None for v in [sma_50, ema_12, ema_26, ema_9, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, stochastic_oscillator, adx_value]) or \
        macd_hist_series is None or len(macd_hist_series) < 2 or bollinger_upper is None or ichimoku_a is None:
         return "HOLD"
 
@@ -225,11 +244,11 @@ def decide(current_price, price_history, news_context):
     is_extreme_crash_velocity = roc_20 < -22.0
     is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold and current_price < donchian_low_30 and (short_atr > long_atr * 1.2) and current_price < keltner_lower_band and current_price > keltner_lower_band - (short_atr * 0.5)
 
-    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 15 and ema_12 > ema_26 and sentiment_score > -1.5 and macd_hist_acceleration > 0 and signal_line[-1] < macd_histogram and ichimoku_a > ichimoku_b and current_price > ichimoku_a and current_price > ichimoku_lagging:
+    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 15 and ema_12 > ema_26 and sentiment_score > -1.5 and macd_hist_acceleration > 0 and signal_line[-1] < macd_histogram and ichimoku_a > ichimoku_b and current_price > ichimoku_a and current_price > ichimoku_lagging and adx_value > 25:
         return "BUY"
 
     if is_crisis_regime:
-        is_recovering_from_oversold = rsi > 40 and macd_hist_delta > 0 and stochastic_oscillator > 85 and sentiment_score > -0.5 and ichimoku_a > ichimoku_b and current_price > ichimoku_a and current_price > ichimoku_lagging
+        is_recovering_from_oversold = rsi > 40 and macd_hist_delta > 0 and stochastic_oscillator > 85 and sentiment_score > -0.5 and ichimoku_a > ichimoku_b and current_price > ichimoku_a and current_price > ichimoku_lagging and adx_value > 20
         if is_recovering_from_oversold:
             return "BUY"
         if macd_histogram < 0 or current_price < sma_50:
@@ -251,13 +270,13 @@ def decide(current_price, price_history, news_context):
     is_primary_downtrend = current_price < sma_50
     is_momentum_confirming_down = macd_histogram < 0 and prev_macd_histogram >= 0
     is_sentiment_permissive_for_sell = sentiment_score < 2.0
-    if is_primary_downtrend and is_momentum_confirming_down and is_sentiment_permissive_for_sell:
+    if is_primary_downtrend and is_momentum_confirming_down and is_sentiment_permissive_for_sell and adx_value > 20:
         return "SELL"
 
     is_momentum_fading = macd_hist_delta < 0
     overbought_threshold = 85 if is_high_volatility else 82
     is_extremely_overbought = rsi > overbought_threshold
-    if is_extremely_overbought and is_momentum_fading:
+    if is_extremely_overbought and is_momentum_fading and adx_value > 25:
         return "SELL"
 
     is_primary_uptrend = current_price > sma_50 and (sma_200 is None or current_price > sma_200)
@@ -271,7 +290,7 @@ def decide(current_price, price_history, news_context):
     is_ichimoku_cloud_positive = ichimoku_a > ichimoku_b and current_price > ichimoku_a
     is_lagging_positive = current_price > ichimoku_lagging
 
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_keltner_channel and is_bollinger_in_range and stochastic_oscillator > 30 and is_ema_crossover and macd_hist_acceleration > 0 and is_ichimoku_cloud_positive and is_lagging_positive:
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_keltner_channel and is_bollinger_in_range and stochastic_oscillator > 30 and is_ema_crossover and macd_hist_acceleration > 0 and is_ichimoku_cloud_positive and is_lagging_positive and adx_value > 20:
         return "BUY"
 
     return "HOLD"
