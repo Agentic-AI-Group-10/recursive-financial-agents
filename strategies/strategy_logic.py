@@ -177,16 +177,6 @@ def calculate_sentiment_score(news_context):
 
     return net_sentiment_score
 
-def calculate_ichimoku_cloud(prices, period=26):
-    """Calculates the Ichimoku Cloud."""
-    if len(prices) < period:
-        return None, None, None, None
-    tenkan_sen = calculate_ema(prices, 9)
-    kijun_sen = calculate_ema(prices, 26)
-    senkou_a = (tenkan_sen + kijun_sen) / 2
-    senkou_b = calculate_ema(senkou_a, 26)
-    return tenkan_sen, kijun_sen, senkou_a, senkou_b
-
 def dynamic_scaling(all_prices):
     sma_trend_long = max(100, len(all_prices) // 2)
     sma_trend_medium = max(50, len(all_prices) // 4)
@@ -206,6 +196,17 @@ def calculate_ema_trend(prices, period=50):
     if len(prices) < period:
         return None
     return calculate_ema_series(prices, period)[-1]
+
+def calculate_ichimoku_cloud(prices, period=26):
+    """Calculates the Ichimoku Cloud."""
+    if len(prices) < period:
+        return None, None, None, None, None
+    tenkan_sen = calculate_ema(prices, 9)
+    kijun_sen = calculate_ema(prices, 26)
+    senkou_span_a = (tenkan_sen + kijun_sen) / 2
+    senkou_span_b = calculate_ema(prices, 52)
+    chikou_span = prices[-26:]
+    return tenkan_sen, kijun_sen, senkou_span_a, senkou_span_b, chikou_span
 
 def decide(current_price, price_history, news_context):
     context_lower = news_context.lower()
@@ -231,7 +232,7 @@ def decide(current_price, price_history, news_context):
     stochastic_oscillator = calculate_stochastic_oscillator(all_prices)
     fi = calculate_force_index(all_prices, all_volumes)
     keltner_upper_band, keltner_lower_band = calculate_keltner_channel(all_prices)
-    tenkan_sen, kijun_sen, senkou_a, senkou_b = calculate_ichimoku_cloud(all_prices)
+    tenkan_sen, kijun_sen, senkou_span_a, senkou_span_b, chikou_span = calculate_ichimoku_cloud(all_prices)
 
     if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, upper_band, lower_band, stochastic_oscillator, fi]) or \
        macd_hist_series is None or len(macd_hist_series) < 2:
