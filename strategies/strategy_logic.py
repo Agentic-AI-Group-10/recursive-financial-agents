@@ -13,7 +13,7 @@ def calculate_ema_series(data, period):
         import pandas as pd
         return pd.Series(data_arr).ewm(span=period, adjust=False).mean().to_numpy()
     except ImportError:
-        ema_values = np.zeros_like(data_arr, dtype=float)
+        ema_values = np.zeros_like(data_arr)
         ema_values[period-1] = np.mean(data_arr[:period])
         multiplier = 2 / (period + 1)
         for i in range(period, len(data_arr)):
@@ -51,195 +51,186 @@ def calculate_macd_series(prices, short_period=12, long_period=26, signal_period
     """Calculates the MACD line, signal line, and histogram series."""
     if len(prices) < long_period:
         return None, None, None
-    prices_arr = np.array(prices, dtype=float)
-    short_ema_full = calculate_ema_series(prices_arr, short_period)
-    long_ema_full = calculate_ema_series(prices_arr, long_period)
+    # Ensure full series are calculated for alignment
+    full_short_ema = calculate_ema_series(prices, short_period)
+    full_long_ema = calculate_ema_series(prices, long_period)
     
-    # Align series by taking the tail of the shorter one
-    macd_line = short_ema_full[len(short_ema_full)-len(long_ema_full):] - long_ema_full
+    # Align the series before subtraction
+    macd_line = full_short_ema[long_period-short_period:] - full_long_ema
     
     if len(macd_line) < signal_period:
         return macd_line, None, None
-        
-    signal_line = calculate_ema_series(macd_line, signal_period)
     
-    # Align again for histogram
-    histogram = macd_line[len(macd_line)-len(signal_line):] - signal_line
-    return macd_line, signal_line, histogram
+    # Calculate signal line on the aligned MACD line
+    signal_line_full = calculate_ema_series(macd_line, signal_period)
+    
+    # Align histogram calculation
+    histogram = macd_line[signal_period-1:] - signal_line_full
+    
+    return macd_line[signal_period-1:], signal_line_full, histogram
 
 def calculate_atr(prices, period=14):
-    """Calculates Average True Range (ATR) using close-to-close volatility."""
+    """Calculates Average True Range (ATR) using close-to-close volatility for simplicity."""
     if len(prices) < period + 1:
         return None
     prices_arr = np.array(prices, dtype=float)
     price_ranges = np.abs(np.diff(prices_arr))
-    atr_series = calculate_ema_series(price_ranges, period)
-    return atr_series[-1] if len(atr_series) > 0 else None
-
-def calculate_roc(prices, period=20):
-    """Calculates the Rate of Change (ROC) over a given period."""
-    if len(prices) < period + 1:
+    # Using SMA for ATR calculation for simplicity and robustness without pandas
+    if len(price_ranges) < period:
         return None
-    return ((prices[-1] - prices[-1 - period]) / prices[-1 - period]) * 100
+    return np.mean(price_ranges[-period:])
 
-def calculate_bollinger_bands(prices, period=20, num_std_dev=2):
-    """Calculates Bollinger Bands."""
-    if len(prices) < period:
-        return None, None, None, None
-    prices_arr = np.array(prices[-period:], dtype=float)
-    sma = np.mean(prices_arr)
-    std_dev = np.std(prices_arr)
-    upper_band = sma + (std_dev * num_std_dev)
-    lower_band = sma - (std_dev * num_std_dev)
+def calculate_adx(prices, period=14):
+    """Calculates the Average Directional Index (ADX)."""
+    if len(prices) < 2 * period:
+        return None
     
-    # Calculate bandwidth for squeeze detection
-    bandwidth = (upper_band - lower_band) / sma if sma != 0 else 0
-    return upper_band, sma, lower_band, bandwidth
+    prices_arr = np.array(prices, dtype=float)
+    up_moves = np.diff(prices_arr)
+    down_moves = -up_moves
+
+    plus_dm = np.where((up_moves > down_moves) & (up_moves > 0), up_moves, 0)
+    minus_dm = np.where((down_moves > up_moves) & (down_moves > 0), down_moves, 0)
+    
+    tr = np.abs(np.diff(prices_arr)) # Simplified TR for close-only data
+
+    # Using EMA-like smoothing (Wilder's smoothing)
+    atr = np.zeros(len(tr))
+    plus_di = np.zeros(len(tr))
+    minus_di = np.zeros(len(tr))
+    
+    atr[period-1] = np.mean(tr[:period])
+    smooth_plus_dm = np.mean(plus_dm[:period])
+    smooth_minus_dm = np.mean(minus_dm[:period])
+
+    for i in range(period, len(tr)):
+        atr[i] = (atr[i-1] * (period - 1) + tr[i]) / period
+        smooth_plus_dm = (smooth_plus_dm * (period - 1) + plus_dm[i]) / period
+        smooth_minus_dm = (smooth_minus_dm * (period - 1) + minus_dm[i]) / period
+    
+    with np.errstate(divide='ignore', invalid='ignore'):
+        plus_di = 100 * smooth_plus_dm / atr
+        minus_di = 100 * smooth_minus_dm / atr
+        plus_di[atr == 0] = 0
+        minus_di[atr == 0] = 0
+
+    dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di)
+    dx[np.isnan(dx)] = 0
+    
+    if len(dx) < period:
+        return None
+        
+    adx = np.mean(dx[-period:]) # SMA of DX for final ADX value
+    return adx
 
 def decide(current_price, price_history, news_context):
     """
     SELF-IMPROVED STRATEGY V3:
-    This version introduces Bollinger Bands to create a more adaptive,
-    volatility-aware system, building on the successful regime-based parent.
-    1.  Volatility Breakout Signal: A new Bollinger Band Squeeze detector
-        identifies periods of low volatility. Buy/Sell signals are now
-        prioritized when breaking out from these consolidations, aiming to
-        catch nascent trends and filter out choppy market noise.
-    2.  Dynamic Overbought/Oversold Levels: Static RSI thresholds for
-        profit-taking are replaced by the upper Bollinger Band. A sell is
-        triggered if the price exceeds the upper band and momentum fades,
-        making the exit more responsive to current volatility.
-    3.  Enhanced Sentiment Density Scoring: The sentiment engine now applies a
-        multiplier if multiple strong keywords are detected, giving more weight
-        to news cycles with a clear, unified narrative (e.g., multiple positive
-        inflation reports) for higher conviction trades.
+    This version introduces three major enhancements for improved adaptiveness and risk control:
+    1.  Trend Strength Confirmation (ADX): A new buy condition requires the Average Directional
+        Index (ADX) to be above 20. This filters out weak or sideways markets, reducing
+        whipsaw trades and ensuring capital is deployed only in strong, established trends.
+    2.  Dynamic Volatility-Based Stop-Loss: The fixed percentage stop-loss is replaced
+        with a dynamic stop based on a multiple of the Average True Range (ATR). This allows
+        the stop to widen during high volatility and tighten in calm markets, providing
+        more intelligent risk management.
+    3.  Parabolic Extension Profit-Taking: A new sell trigger is added to take profits
+        when the price extends too far (e.g., >10%) above its 20-day EMA, capturing gains
+        from unsustainable "blow-off top" scenarios before a sharp reversal.
     """
     # --- 1. Sentiment Analysis ---
     context_lower = news_context.lower()
     sentiment_keywords = {
         "fed pivot": 3.0, "rate cut": 2.5, "quantitative easing": 2.5, "soft landing": 2.5,
-        "cooling inflation": 2.5, "ai revolution": 2.5, "stimulus": 2.0, "dovish": 2.0,
-        "record high": 2.0, "bullish": 2.0, "strong earnings": 2.0, "beat estimates": 1.5,
-        "short squeeze": 3.5, "capitulation": 3.0,
+        "cooling inflation": 2.5, "ai boom": 2.5, "stimulus": 2.0, "dovish": 2.0,
+        "record high": 2.0, "bullish": 2.0, "strong earnings": 2.0, "short squeeze": 3.5,
+        "capitulation": 3.0, "panic selling": 2.5, "extreme fear": 2.0,
         "recession": -3.0, "crisis": -3.0, "stagflation": -3.0, "hot inflation": -3.0,
         "war": -3.0, "yield curve inversion": -3.5, "quantitative tightening": -2.5,
         "black swan": -4.0, "systemic risk": -4.0, "contagion": -3.5, "credit crunch": -3.5,
-        "rate hike": -2.5, "bankruptcy": -2.5, "supply chain disruption": -2.5,
-        "geopolitical tensions": -2.5, "hawkish": -2.0, "bearish": -2.0, "sell-off": -2.0,
-        "bubble": -2.0, "uncertainty": -1.5, "euphoria": -2.5, "extreme greed": -2.5,
+        "rate hike": -2.5, "bankruptcy": -2.5, "hawkish": -2.0, "bearish": -2.0,
+        "sell-off": -2.0, "bubble": -2.0, "uncertainty": -1.5,
+        "euphoria": -2.5, "mania": -3.0, "extreme greed": -2.5,
     }
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent"]
     net_sentiment_score = 0.0
-    positive_hits = 0
-    negative_hits = 0
     for keyword, weight in sentiment_keywords.items():
         pattern = r'\b' + re.escape(keyword) + r'\b'
         for match in re.finditer(pattern, context_lower):
             pre_context = context_lower[max(0, match.start() - 30):match.start()]
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
-            score = -weight if is_negated else weight
-            net_sentiment_score += score
-            if score > 1.5: positive_hits += 1
-            if score < -1.5: negative_hits += 1
-
-    # Density multiplier
-    if positive_hits >= 2: net_sentiment_score *= 1.2
-    if negative_hits >= 2: net_sentiment_score *= 1.2
+            net_sentiment_score += -weight if is_negated else weight
+    
+    # Cap sentiment score to prevent it from dominating technicals
+    net_sentiment_score = max(min(net_sentiment_score, 7.0), -7.0)
 
     # --- 2. Technical Indicators & State Calculation ---
     all_prices = price_history + [current_price]
 
     # Indicator Periods
-    SMA_TREND_LONG = 100
     SMA_TREND_MEDIUM = 50
+    EMA_SHORT = 20
     RSI_PERIOD = 14
-    ATR_SHORT = 10
-    ATR_LONG = 50
-    ROC_CRASH_PERIOD = 20
-    STOP_LOSS_LOOKBACK = 20
-    BBAND_PERIOD = 20
+    ATR_PERIOD = 14
+    ADX_PERIOD = 14
+    STOP_LOSS_LOOKBACK = 25
 
-    required_history_length = max(SMA_TREND_LONG + 1, 50)
+    required_history_length = max(SMA_TREND_MEDIUM + 1, ADX_PERIOD * 2, 50)
     if len(all_prices) < required_history_length:
         return "HOLD"
 
     # Calculate core indicators
-    sma_100 = calculate_sma(all_prices, SMA_TREND_LONG)
     sma_50 = calculate_sma(all_prices, SMA_TREND_MEDIUM)
+    ema_20_series = calculate_ema_series(all_prices, EMA_SHORT)
     rsi = calculate_rsi(all_prices, RSI_PERIOD)
     _, _, macd_hist_series = calculate_macd_series(all_prices)
-    short_atr = calculate_atr(all_prices, ATR_SHORT)
-    long_atr = calculate_atr(all_prices, ATR_LONG)
-    roc_20 = calculate_roc(all_prices, ROC_CRASH_PERIOD)
-    donchian_high_20 = np.max(all_prices[-STOP_LOSS_LOOKBACK:])
-    upper_bband, middle_bband, lower_bband, bband_width = calculate_bollinger_bands(all_prices, BBAND_PERIOD)
-    
-    # Calculate historical bandwidth to detect a squeeze
-    _, _, _, prev_bband_width = calculate_bollinger_bands(all_prices[:-1], BBAND_PERIOD)
-    is_bb_squeeze = bband_width < 0.06 and (prev_bband_width is not None and prev_bband_width > 0.06)
+    atr = calculate_atr(all_prices, ATR_PERIOD)
+    adx = calculate_adx(all_prices, ADX_PERIOD)
+    donchian_high = np.max(all_prices[-STOP_LOSS_LOOKBACK:]) if len(all_prices) >= STOP_LOSS_LOOKBACK else None
 
     # Null check for all indicators
-    if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, upper_bband]) or macd_hist_series is None or len(macd_hist_series) < 2:
+    if any(v is None for v in [sma_50, rsi, atr, adx, donchian_high]) or macd_hist_series is None or len(macd_hist_series) < 2 or ema_20_series is None or len(ema_20_series) < 1:
         return "HOLD"
 
+    ema_20 = ema_20_series[-1]
     macd_histogram = macd_hist_series[-1]
     prev_macd_histogram = macd_hist_series[-2]
-    macd_hist_delta = macd_histogram - prev_macd_histogram
-
-    # --- 3. Regime Detection ---
-    is_long_term_downtrend = current_price < sma_100
-    is_high_volatility = short_atr > (long_atr * 1.75)
-    is_crash_velocity = roc_20 < -15.0
-    is_crisis_regime = (is_long_term_downtrend and is_high_volatility) or is_crash_velocity
-
-    is_deeply_oversold = rsi < 25
-    is_extreme_crash_velocity = roc_20 < -18.0
-    is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold
-
-    # --- 4. Decision Logic (Hierarchical) ---
-
-    # REGIME 1: CONTRARIAN CAPITULATION (HIGHEST PRIORITY)
-    if is_capitulation_candidate and macd_hist_delta > 0:
-        return "BUY"
-
-    # REGIME 2: CRISIS AVERSION
-    if is_crisis_regime:
-        if macd_histogram < 0 or current_price < sma_50:
-            return "SELL"
-        return "HOLD"
-
-    # REGIME 3: NORMAL MARKET CONDITIONS
+    
+    # --- 3. Decision Logic (Hierarchical) ---
 
     # --- SELL LOGIC (Risk Management First) ---
-    # Priority 1: Dynamic Stop-Loss.
-    if current_price < (donchian_high_20 * 0.93):
+    
+    # Priority 1: Dynamic Volatility Stop-Loss. Exit if price drops more than 3 * ATR from recent high.
+    stop_loss_price = donchian_high - (3.0 * atr)
+    if current_price < stop_loss_price:
         return "SELL"
 
-    # Priority 2: Dynamic Profit-Taking on Over-extension.
-    is_overextended = current_price > upper_bband
-    is_momentum_fading = macd_hist_delta < 0
-    if is_overextended and is_momentum_fading:
+    # Priority 2: Parabolic Extension Profit-Taking. Sell if price is >10% above 20-day EMA.
+    if current_price > (ema_20 * 1.10) and rsi > 75:
         return "SELL"
 
     # Priority 3: Standard trend breakdown signal.
-    is_primary_downtrend = current_price < sma_50
-    is_momentum_confirming_down = macd_histogram < 0 and prev_macd_histogram >= 0
-    if is_primary_downtrend and is_momentum_confirming_down:
+    is_trend_down = current_price < sma_50
+    is_momentum_crossing_down = macd_histogram < 0 and prev_macd_histogram >= 0
+    if is_trend_down and is_momentum_crossing_down:
+        return "SELL"
+
+    # Priority 4: Profit-taking on overbought conditions with FADING momentum.
+    is_momentum_fading = macd_histogram < prev_macd_histogram
+    is_overbought = rsi > 80
+    if is_overbought and is_momentum_fading:
         return "SELL"
 
     # --- BUY LOGIC ---
-    is_primary_uptrend = current_price > sma_50 and current_price > middle_bband
-    is_momentum_confirming_up = macd_histogram > 0 and prev_macd_histogram <= 0
+    is_trend_up = current_price > sma_50
+    is_momentum_crossing_up = macd_histogram > 0 and prev_macd_histogram <= 0
     is_not_overbought = rsi < 78
-    is_sentiment_permissive_for_buy = net_sentiment_score > -3.0
+    is_sentiment_permissive = net_sentiment_score > -4.0
+    
+    # NEW: Trend Strength Confirmation using ADX
+    is_strong_trend = adx > 20
 
-    # Standard Buy Signal
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy:
-        return "BUY"
-        
-    # Volatility Breakout Buy Signal (Higher Conviction)
-    is_breakout_up = current_price > middle_bband and all_prices[-2] <= middle_bband
-    if is_bb_squeeze and is_breakout_up and is_sentiment_permissive_for_buy:
+    if is_trend_up and is_momentum_crossing_up and is_not_overbought and is_sentiment_permissive and is_strong_trend:
         return "BUY"
 
     # Default action is to hold the current position.
