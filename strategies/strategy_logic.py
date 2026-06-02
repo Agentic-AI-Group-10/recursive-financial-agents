@@ -116,13 +116,13 @@ def calculate_sentiment_score(news_context):
         "inflation concerns": -1.0, "deflation risk": -2.0, "market breadth": 1.0,
         "geopolitical stability": 2.0, "market resilience": 2.0
     }
-    negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent", "unlikely", "avoid", "no signs of", "unlikely to", "lack", "absence", "never", "none", "neglect", "without", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect"]
+    negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent", "unlikely", "avoid", "no signs of", "unlikely to", "lack", "absence", "never", "none", "neglect", "without", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "never again", "no longer", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect"]
     net_sentiment_score = 0.0
     for keyword, weight in sentiment_keywords.items():
         pattern = r'(?<!\S)' + re.escape(keyword) + r'(?!\S)'
         for match in re.finditer(pattern, context_lower):
-            pre_context = context_lower[max(0, match.start() - 100):match.start()]
-            post_context = context_lower[match.end():match.end() + 100]
+            pre_context = context_lower[max(0, match.start() - 150):match.start()]
+            post_context = context_lower[match.end():match.end() + 150]
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
             if any(neg_word in post_context for neg_word in negation_words):
                 is_negated = not is_negated
@@ -139,9 +139,16 @@ def decide(current_price, price_history, news_context):
 
     sma_50 = np.mean(all_prices[-50:])
     sma_200 = np.mean(all_prices[-200:])
-    ema_12 = calculate_ema_series(all_prices, 12)[-1] if len(all_prices) >= 12 else None
-    ema_26 = calculate_ema_series(all_prices, 26)[-1] if len(all_prices) >= 26 else None
-    ema_9 = calculate_ema_series(all_prices, 9)[-1] if len(all_prices) >= 9 else None
+    
+    # Adaptive EMA periods based on data length
+    ema_short = 5 if len(all_prices) < 30 else 12
+    ema_long = 10 if len(all_prices) < 30 else 26
+    ema_signal = 5 if len(all_prices) < 30 else 9
+    
+    ema_12 = calculate_ema_series(all_prices, ema_short)[-1] if len(all_prices) >= ema_short else None
+    ema_26 = calculate_ema_series(all_prices, ema_long)[-1] if len(all_prices) >= ema_long else None
+    ema_9 = calculate_ema_series(all_prices, ema_signal)[-1] if len(all_prices) >= ema_signal else None
+    
     rsi = calculate_rsi(all_prices, 14)
     macd_line, signal_line, macd_hist_series = calculate_macd_series(all_prices)
     short_atr = calculate_atr(all_prices, 20)
