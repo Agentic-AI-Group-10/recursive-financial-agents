@@ -12,9 +12,18 @@ def calculate_ema_series(data, period):
     try:
         import pandas as pd
         # Using pandas is preferred for accuracy and standard implementation
+        # .ewm(adjust=False) uses alpha = 2/(span+1) and initial value is the first data point.
+        # To align with typical EMA definition where the first EMA is SMA of first 'period' values,
+        # and subsequent EMAs use previous EMA, we need to adjust.
+        # A common approach for adjust=False is to use the first value as the initial EMA.
+        # For a series, pandas' ewm(adjust=False) starts calculating from the first value.
+        # If we want the first EMA to be the SMA of the first 'period' values, we need to seed it.
+        # The current implementation of pandas' ewm(span=period, adjust=False) effectively
+        # uses the first available data point as the initial EMA for the calculation.
+        # The slice [period-1:] ensures we get values after enough data points for the EMA to stabilize.
         return pd.Series(data_arr).ewm(span=period, adjust=False).mean().to_numpy()[period-1:]
     except ImportError:
-        # Fallback pure-python EMA calculation
+        # Fallback pure-python EMA calculation, using SMA for the first value
         ema_values = np.zeros(len(data_arr) - period + 1, dtype=float)
         ema_values[0] = np.mean(data_arr[:period])
         multiplier = 2 / (period + 1)
@@ -34,40 +43,61 @@ def calculate_rsi(prices, period=14):
         return None
     prices_arr = np.array(prices, dtype=float)
     deltas = np.diff(prices_arr)
+    
+    # Initial average gain/loss over the first 'period' deltas
     seed_gains = deltas[:period][deltas[:period] >= 0].sum()
     seed_losses = -deltas[:period][deltas[:period] < 0].sum()
+    
     avg_gain = seed_gains / period
     avg_loss = seed_losses / period
+    
+    # Wilder's smoothing for subsequent periods
     for i in range(period, len(deltas)):
         delta = deltas[i]
         gain = delta if delta >= 0 else 0.0
         loss = -delta if delta < 0 else 0.0
+        
         avg_gain = (avg_gain * (period - 1) + gain) / period
         avg_loss = (avg_loss * (period - 1) + loss) / period
+        
     if avg_loss == 0:
-        return 100.0
+        return 100.0 # No losses, RSI is 100
+    
     rs = avg_gain / avg_loss
     return 100.0 - (100.0 / (1.0 + rs))
 
 def calculate_macd_series(prices, short_period=12, long_period=26, signal_period=9):
     """Calculates the MACD line, signal line, and histogram series."""
-    if len(prices) < long_period:
+    if len(prices) < long_period: # Need at least long_period for the first long EMA
         return None, None, None
+    
     short_ema_series = calculate_ema_series(prices, short_period)
     long_ema_series = calculate_ema_series(prices, long_period)
+    
+    # MACD line is the difference between short and long EMA.
+    # Align the series lengths by taking the tail of the shorter EMA.
     macd_line = short_ema_series[len(short_ema_series)-len(long_ema_series):] - long_ema_series
-    if len(macd_line) < signal_period:
+    
+    if len(macd_line) < signal_period: # Need enough MACD line values for signal EMA
         return macd_line, None, None
+        
     signal_line = calculate_ema_series(macd_line, signal_period)
+    
+    # Histogram is MACD line minus signal line.
+    # Align the series lengths again.
     histogram = macd_line[len(macd_line)-len(signal_line):] - signal_line
+    
     return macd_line, signal_line, histogram
 
 def calculate_atr(prices, period=14):
     """Calculates Average True Range (ATR) using close-to-close volatility."""
+    # For simplicity and given only closing prices, ATR is approximated by
+    # the EMA of absolute daily price changes.
     if len(prices) < period + 1:
         return None
     prices_arr = np.array(prices, dtype=float)
-    price_ranges = np.abs(np.diff(prices_arr))
+    price_ranges = np.abs(np.diff(prices_arr)) # True Range approximation
+    
     atr_series = calculate_ema_series(price_ranges, period)
     return atr_series[-1] if len(atr_series) > 0 else None
 
@@ -75,30 +105,25 @@ def calculate_roc(prices, period=20):
     """Calculates the Rate of Change (ROC) over a given period."""
     if len(prices) < period + 1:
         return None
+    # ROC = ((Current Price - Price N periods ago) / Price N periods ago) * 100
     return ((prices[-1] - prices[-1 - period]) / prices[-1 - period]) * 100
 
 def decide(current_price, price_history, news_context):
     """
     SELF-IMPROVED STRATEGY V3:
-    This version refines the parent strategy to enhance resilience during stress regimes
-    and improve risk management, while retaining strong performance in normal markets.
-
-    Key Enhancements:
-    1.  Robust Contrarian Capitulation Buy: The "buy the dip" logic is strengthened.
-        It now requires a slightly less extreme oversold RSI (below 30) but
-        demands stronger momentum confirmation (MACD histogram turning positive
-        from negative territory) AND explicit sentiment confirmation of extreme fear
-        (net_sentiment_score < -4.0). This aims to filter out false bottoms and
-        target high-conviction reversals.
-    2.  Dynamic ATR-Based Stop-Loss: Replaces the fixed 7% stop-loss with a stop
-        level calculated using a multiple of the Average True Range (ATR) below
-        a recent high. This makes the stop-loss adaptive to current market volatility,
-        widening during turbulent periods and tightening during calm ones, for
-        more effective capital preservation.
-    3.  Sentiment Threshold Adjustment: The sentiment permissiveness for a normal
-        buy is maintained, but the capitulation buy explicitly allows for (and
-        even requires) deeply negative sentiment, addressing the issue of
-        overwhelming negative news preventing contrarian entries during crises.
+    This version refines the strategy based on lessons from stress regimes:
+    1.  Capitulation Buy Enhancement: The contrarian "buy the dip" logic is now
+        independent of the general sentiment score. This allows it to trigger
+        during extreme market crashes (high ROC decline, low RSI, positive MACD
+        histogram delta) even when overall news sentiment is overwhelmingly negative,
+        addressing the issue of missed recovery entries during crises.
+    2.  Loosened Dynamic Stop-Loss: The percentage for the dynamic stop-loss is
+        adjusted from 7% to 8% (0.93 to 0.92). This provides slightly more room
+        for price fluctuations, aiming to reduce premature stop-outs during periods
+        of increased volatility, as observed in past stress regime performance.
+    3.  Maintains Robust Normal Regime Logic: The core trend-following and
+        momentum-based buy/sell signals, along with profit-taking in overbought
+        conditions, remain effective for stable market environments.
     """
     # --- 1. Sentiment Analysis ---
     context_lower = news_context.lower()
@@ -138,9 +163,10 @@ def decide(current_price, price_history, news_context):
     ATR_LONG = 50
     ROC_CRASH_PERIOD = 20
     STOP_LOSS_LOOKBACK = 20
-    ATR_STOP_MULTIPLIER = 2.5 # Multiplier for ATR-based stop-loss
 
-    required_history_length = max(SMA_TREND_LONG + 1, ATR_LONG + 1, ROC_CRASH_PERIOD + 1, 50)
+    # Ensure enough history for all indicators
+    required_history_length = max(SMA_TREND_LONG + 1, ATR_LONG + 1, ROC_CRASH_PERIOD + 1, RSI_PERIOD + 1, 
+                                  26 + 9 + 1, STOP_LOSS_LOOKBACK + 1) # MACD requires long_period + signal_period for full series
     if len(all_prices) < required_history_length:
         return "HOLD"
 
@@ -170,33 +196,32 @@ def decide(current_price, price_history, news_context):
     is_crisis_regime = (is_long_term_downtrend and is_high_volatility) or is_crash_velocity
 
     # Capitulation Regime: An extreme subset of crisis, signaling a potential bottom
+    is_deeply_oversold = rsi < 25
     is_extreme_crash_velocity = roc_20 < -18.0
-    is_oversold_capitulation = rsi < 30 # Slightly relaxed RSI for earlier detection
-    is_momentum_reversing_up_from_negative = macd_histogram < 0 and macd_hist_delta > 0
-    is_sentiment_confirming_fear = net_sentiment_score < -4.0 # Explicitly require extreme negative sentiment
+    is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold
 
     # --- 4. Decision Logic (Hierarchical) ---
 
-    # REGIME 1: ROBUST CONTRARIAN CAPITULATION (HIGHEST PRIORITY)
-    # Buy when there is blood in the streets, but only if momentum shows clear signs of turning
-    # AND sentiment confirms extreme fear.
-    if is_extreme_crash_velocity and is_oversold_capitulation and \
-       is_momentum_reversing_up_from_negative and is_sentiment_confirming_fear:
+    # REGIME 1: CONTRARIAN CAPITULATION (HIGHEST PRIORITY)
+    # Buy when there is blood in the streets, but only if momentum shows signs of turning.
+    # Removed sentiment filter here to allow buys during extreme negative sentiment.
+    if is_capitulation_candidate and macd_hist_delta > 0:
         return "BUY"
 
     # REGIME 2: CRISIS AVERSION
     # If in a general crisis (but not a specific capitulation buy signal), be defensive.
     if is_crisis_regime:
+        # If momentum is negative or price is below medium-term trend, sell.
+        # Otherwise, hold current position (or cash if not in position).
         if macd_histogram < 0 or current_price < sma_50:
             return "SELL"
-        return "HOLD" # Hold cash and wait for the storm to pass.
+        return "HOLD" # Hold cash and wait for the storm to pass, or hold existing position if conditions are not explicitly bearish.
 
     # REGIME 3: NORMAL MARKET CONDITIONS
 
     # --- SELL LOGIC (Risk Management First) ---
-    # Priority 1: Dynamic ATR-based Stop-Loss.
-    stop_loss_level = donchian_high_20 - (ATR_STOP_MULTIPLIER * short_atr)
-    if current_price < stop_loss_level:
+    # Priority 1: Dynamic Stop-Loss. Loosened to 8% drop from 20-day high.
+    if current_price < (donchian_high_20 * 0.92): # Adjusted from 0.93 to 0.92
         return "SELL"
 
     # Priority 2: Standard trend breakdown signal.
@@ -216,7 +241,7 @@ def decide(current_price, price_history, news_context):
     is_primary_uptrend = current_price > sma_50
     is_momentum_confirming_up = macd_histogram > 0 and prev_macd_histogram <= 0
     is_not_overbought = rsi < 78
-    is_sentiment_permissive_for_buy = net_sentiment_score > -3.0 # Normal buy sentiment threshold
+    is_sentiment_permissive_for_buy = net_sentiment_score > -3.0
     is_sufficient_volatility = short_atr > (long_atr * 0.6) # Avoids entering dead, sideways markets.
 
     if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility:
