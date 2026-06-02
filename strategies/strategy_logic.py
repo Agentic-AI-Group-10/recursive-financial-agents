@@ -127,7 +127,8 @@ def calculate_sentiment_score(news_context):
         "sector rotation": 1.9, "valuation expansion": 1.7, "valuation contraction": -1.7,
         "market breadth expansion": 1.8, "liquidity surge": 2.4, "portfolio rebalancing": 1.5,
         "technical breakout": 2.3, "short covering": 2.5, "liquidity crunch": -2.8,
-        "margin squeeze": -2.7, "deleveraging": -2.5, "credit expansion": 2.3
+        "margin squeeze": -2.7, "deleveraging": -2.5, "credit expansion": 2.3,
+        "inflation easing": 2.9, "market stability": 2.4, "policy clarity": 2.3
     }
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent", "unlikely", "avoid", "no signs of", "unlikely to", "lack", "absence", "never", "none", "neglect", "without", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "never again", "no longer", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "without any", "lack any", "fail any", "struggle any", "prevent any", "avoid any", "unlikely any", "neglect any"]
     net_sentiment_score = 0.0
