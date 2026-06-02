@@ -16,6 +16,7 @@ def calculate_ema_series(data, period):
     except ImportError:
         # Fallback pure-python EMA calculation
         ema_values = np.zeros(len(data_arr) - period + 1, dtype=float)
+        # Initialize with SMA for the first 'period' values
         ema_values[0] = np.mean(data_arr[:period])
         multiplier = 2 / (period + 1)
         for i in range(1, len(ema_values)):
@@ -34,16 +35,21 @@ def calculate_rsi(prices, period=14):
         return None
     prices_arr = np.array(prices, dtype=float)
     deltas = np.diff(prices_arr)
+
+    # Initial average gain/loss calculation
     seed_gains = deltas[:period][deltas[:period] >= 0].sum()
     seed_losses = -deltas[:period][deltas[:period] < 0].sum()
     avg_gain = seed_gains / period
     avg_loss = seed_losses / period
+
+    # Wilder's smoothing
     for i in range(period, len(deltas)):
         delta = deltas[i]
         gain = delta if delta >= 0 else 0.0
         loss = -delta if delta < 0 else 0.0
         avg_gain = (avg_gain * (period - 1) + gain) / period
         avg_loss = (avg_loss * (period - 1) + loss) / period
+
     if avg_loss == 0:
         return 100.0
     rs = avg_gain / avg_loss
@@ -53,27 +59,42 @@ def calculate_macd_series(prices, short_period=12, long_period=26, signal_period
     """Calculates the MACD line, signal line, and histogram series."""
     if len(prices) < long_period:
         return None, None, None
+    
     short_ema_series = calculate_ema_series(prices, short_period)
     long_ema_series = calculate_ema_series(prices, long_period)
+
+    # Ensure EMAs are aligned for subtraction
+    if len(short_ema_series) < len(long_ema_series):
+        return None, None, None # Not enough data for short EMA after long EMA is calculated
+    
     macd_line = short_ema_series[len(short_ema_series)-len(long_ema_series):] - long_ema_series
+    
     if len(macd_line) < signal_period:
         return macd_line, None, None
+    
     signal_line = calculate_ema_series(macd_line, signal_period)
+    
+    # Ensure MACD line and signal line are aligned for histogram calculation
+    if len(macd_line) < len(signal_line):
+        return macd_line, signal_line, None # Not enough MACD line data for signal line
+        
     histogram = macd_line[len(macd_line)-len(signal_line):] - signal_line
     return macd_line, signal_line, histogram
 
 def calculate_atr(prices, period=14):
     """Calculates Average True Range (ATR) using close-to-close volatility."""
-    if len(prices) < period + 1:
+    if len(prices) < period + 1: # Need at least period + 1 prices to calculate 1 TR
         return None
-    prices_arr = np.array(prices, dtype=float)
-    # For ATR, we need High, Low, Close. Since we only have Close, we approximate True Range
-    # as the absolute difference between consecutive closes.
-    # A more robust ATR would require daily HLC data.
-    price_ranges = np.abs(np.diff(prices_arr))
-    if len(price_ranges) < period: # Ensure enough data for EMA of ranges
+    
+    true_ranges = []
+    for i in range(1, len(prices)):
+        high_low = abs(prices[i] - prices[i-1]) # Simplified: using close-to-close for volatility
+        true_ranges.append(high_low)
+    
+    if len(true_ranges) < period:
         return None
-    atr_series = calculate_ema_series(price_ranges, period)
+
+    atr_series = calculate_ema_series(true_ranges, period)
     return atr_series[-1] if len(atr_series) > 0 else None
 
 def calculate_roc(prices, period=20):
@@ -85,17 +106,24 @@ def calculate_roc(prices, period=20):
 def decide(current_price, price_history, news_context):
     """
     SELF-IMPROVED STRATEGY V3:
-    This version refines the successful parent strategy with key enhancements based on
-    quantitative and qualitative feedback:
-    1.  Dynamic ATR-Based Stop-Loss: Replaces the fixed percentage stop-loss with a
-        volatility-adaptive ATR-based stop-loss to improve drawdown control and
-        adapt to changing market conditions.
-    2.  Refined Sentiment Permissiveness: Adjusts sentiment thresholds and neutralizes
-        ambiguous keywords ("strong jobs report") to reduce false signals and allow
-        technical indicators to drive decisions more effectively.
-    3.  Preservation of Core Strengths: Maintains the successful hierarchical regime
-        detection (Contrarian Capitulation, Crisis Aversion) and momentum velocity
-        confirmations (MACD histogram delta) that contributed to past outperformance.
+    This version builds on the successful V2 by incorporating direct feedback from
+    quantitative metrics and semantic lessons, focusing on robust risk management
+    and refined sentiment integration.
+
+    Key Enhancements:
+    1.  **Dynamic ATR-Based Stop-Loss:** Replaces the fixed 7% stop-loss with a
+        volatility-adaptive stop-loss (2.5 * ATR below the 20-day high). This
+        enhancement directly addresses the need for better drawdown control,
+        especially during volatile periods, as highlighted in past lessons.
+    2.  **Refined Sentiment Permissiveness:** Tightens the sentiment thresholds
+        for both buy and sell signals (`net_sentiment_score < 1.5` for selling
+        and `> -1.5` for buying). Additionally, the "strong jobs report" keyword
+        is explicitly neutralized (weight 0.0) to prevent ambiguous market
+        interpretations from influencing decisions, as recommended by semantic lessons.
+    3.  **Consolidated Strengths:** Retains the proven hierarchical decision logic,
+        the contrarian capitulation signal, and momentum velocity confirmation
+        (MACD histogram delta), which have demonstrated effectiveness in both
+        normal and stress market regimes.
     """
     # --- 1. Sentiment Analysis ---
     context_lower = news_context.lower()
@@ -105,7 +133,7 @@ def decide(current_price, price_history, news_context):
         "dovish": 2.0, "record high": 2.0, "bullish": 2.0, "strong earnings": 2.0,
         "beat estimates": 1.5, "recovery": 1.5, "upgrade": 1.5, "de-escalation": 2.0,
         "short squeeze": 3.5, "capitulation": 3.0, "panic selling": 2.5, "extreme fear": 2.0,
-        "strong jobs report": 0.0, # Neutralized: ambiguous market interpretation
+        "strong jobs report": 0.0, # Neutralized as per lesson: ambiguous for market direction
         "recession": -3.0, "crisis": -3.0, "stagflation": -3.0, "hot inflation": -3.0,
         "war": -3.0, "yield curve inversion": -3.5, "quantitative tightening": -2.5,
         "black swan": -4.0, "systemic risk": -4.0, "contagion": -3.5, "credit crunch": -3.5,
@@ -131,12 +159,12 @@ def decide(current_price, price_history, news_context):
     SMA_TREND_LONG = 100
     SMA_TREND_MEDIUM = 50
     RSI_PERIOD = 14
-    ATR_SHORT = 10 # Used for dynamic stop-loss
-    ATR_LONG = 50 # Used for volatility regime detection
+    ATR_SHORT = 10
+    ATR_LONG = 50
     ROC_CRASH_PERIOD = 20
-    STOP_LOSS_LOOKBACK = 20 # Period for recent high for stop-loss
+    STOP_LOSS_LOOKBACK = 20 # For Donchian High
 
-    required_history_length = max(SMA_TREND_LONG + 1, ATR_LONG + 1, ROC_CRASH_PERIOD + 1, STOP_LOSS_LOOKBACK + 1)
+    required_history_length = max(SMA_TREND_LONG + 1, ATR_LONG + 1, ROC_CRASH_PERIOD + 1, STOP_LOSS_LOOKBACK + 1, 50)
     if len(all_prices) < required_history_length:
         return "HOLD"
 
@@ -187,15 +215,16 @@ def decide(current_price, price_history, news_context):
     # REGIME 3: NORMAL MARKET CONDITIONS
 
     # --- SELL LOGIC (Risk Management First) ---
-    # Priority 1: Dynamic ATR-Based Stop-Loss.
-    # Exit if current price drops 2.5 * ATR below the recent 20-day high.
+    # Priority 1: Dynamic Stop-Loss (ATR-based for volatility adaptation)
+    # As per lessons, 2.5 * ATR below recent high
     if current_price < (donchian_high_20 - (2.5 * short_atr)):
         return "SELL"
 
     # Priority 2: Standard trend breakdown signal.
     is_primary_downtrend = current_price < sma_50
     is_momentum_confirming_down = macd_histogram < 0 and prev_macd_histogram >= 0
-    is_sentiment_permissive_for_sell = net_sentiment_score < 1.5 # Tighter sentiment filter
+    # Tighter sentiment permissiveness for selling (from lessons)
+    is_sentiment_permissive_for_sell = net_sentiment_score < 1.5
     if is_primary_downtrend and is_momentum_confirming_down and is_sentiment_permissive_for_sell:
         return "SELL"
 
@@ -209,7 +238,8 @@ def decide(current_price, price_history, news_context):
     is_primary_uptrend = current_price > sma_50
     is_momentum_confirming_up = macd_histogram > 0 and prev_macd_histogram <= 0
     is_not_overbought = rsi < 78
-    is_sentiment_permissive_for_buy = net_sentiment_score > -1.5 # Tighter sentiment filter
+    # Tighter sentiment permissiveness for buying (from lessons)
+    is_sentiment_permissive_for_buy = net_sentiment_score > -1.5
     is_sufficient_volatility = short_atr > (long_atr * 0.6) # Avoids entering dead, sideways markets.
 
     if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility:
