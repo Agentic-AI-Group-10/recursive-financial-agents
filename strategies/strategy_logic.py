@@ -191,6 +191,12 @@ def dynamic_scaling(all_prices):
                                   26 + 9 + 1, stop_loss_lookback + 1, fi_period + 1) 
     return required_history_length
 
+def calculate_ema_trend(prices, period=50):
+    """Calculates the Exponential Moving Average (EMA) trend."""
+    if len(prices) < period:
+        return None
+    return calculate_ema_series(prices, period)[-1]
+
 def decide(current_price, price_history, news_context):
     context_lower = news_context.lower()
     sentiment_score = calculate_sentiment_score(news_context)
@@ -205,6 +211,7 @@ def decide(current_price, price_history, news_context):
     sma_50 = calculate_sma(all_prices, max(50, len(all_prices) // 4))
     rsi = calculate_rsi(all_prices, 14)
     ema_50 = calculate_ema(all_prices, 50)
+    ema_trend = calculate_ema_trend(all_prices)
     macd_line, signal_line, macd_hist_series = calculate_macd_series(all_prices)
     short_atr = calculate_atr(all_prices, 10)
     long_atr = calculate_atr(all_prices, 50)
