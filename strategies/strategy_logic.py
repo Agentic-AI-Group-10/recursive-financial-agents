@@ -141,15 +141,15 @@ def calculate_sentiment_score(news_context):
     for keyword, weight in sentiment_keywords.items():
         pattern = r'(?<!\S)(?i)' + re.escape(keyword) + r'(?!\S)'
         for match in re.finditer(pattern, context_lower):
-            pre_context = context_lower[max(0, match.start() - 150):match.start()]
-            post_context = context_lower[match.end():match.end() + 150]
+            pre_context = context_lower[max(0, match.start() - 200):match.start()]
+            post_context = context_lower[match.end():match.end() + 200]
             is_negated = any(neg_word in pre_context for neg_word in negation_words)
             if any(neg_word in post_context for neg_word in negation_words):
                 is_negated = not is_negated
             if is_negated:
-                weight *= 0.03
+                weight *= 0.02
             net_sentiment_score += -weight if is_negated else weight
-    return net_sentiment_score
+    return max(-5.0, min(5.0, net_sentiment_score))
 
 def decide(current_price, price_history, news_context):
     context_lower = news_context.lower()
@@ -164,9 +164,9 @@ def decide(current_price, price_history, news_context):
     sma_200 = np.mean(all_prices[-200:]) if price_len >= 200 else None
     
     volatility_ratio = calculate_atr(all_prices, 20) / calculate_atr(all_prices, 50)
-    ema_short = 12 if volatility_ratio < 1.5 else 8
-    ema_long = 26 if volatility_ratio < 1.5 else 18
-    ema_signal = 9 if volatility_ratio < 1.5 else 6
+    ema_short = 10 if volatility_ratio < 1.5 else 8
+    ema_long = 24 if volatility_ratio < 1.5 else 20
+    ema_signal = 8 if volatility_ratio < 1.5 else 6
     
     ema_12 = calculate_ema_series(all_prices, ema_short)[-1] if price_len >= ema_short else None
     ema_26 = calculate_ema_series(all_prices, ema_long)[-1] if price_len >= ema_long else None
@@ -183,7 +183,7 @@ def decide(current_price, price_history, news_context):
     bollinger_upper, bollinger_lower, bollinger_sma = calculate_bollinger_bands(all_prices)
 
     if any(v is None for v in [sma_50, ema_12, ema_26, ema_9, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, stochastic_oscillator]) or \
-       macd_hist_series is None or len(macd_hist_series) < 2 or bollinger_upper is None:
+       macd_hist_series is None or len(macd_hist_series) < 3 or bollinger_upper is None:
         return "HOLD"
 
     macd_histogram = macd_hist_series[-1]
@@ -191,62 +191,62 @@ def decide(current_price, price_history, news_context):
     macd_hist_delta = macd_histogram - prev_macd_histogram
     macd_hist_acceleration = macd_hist_delta - (macd_hist_series[-3] - macd_hist_series[-2]) if len(macd_hist_series) >= 3 else 0
 
-    is_high_volatility = volatility_ratio > 1.75
-    is_extreme_volatility = volatility_ratio > 2.0
+    is_high_volatility = volatility_ratio > 1.8
+    is_extreme_volatility = volatility_ratio > 2.1
 
     is_long_term_downtrend = current_price < sma_200 if sma_200 is not None else False
-    is_crash_velocity = roc_20 < -18.0  # Tightened from -15 to -18
-    is_crisis_regime = (is_long_term_downtrend and is_high_volatility) or is_crash_velocity or ("yield curve inversion" in context_lower)
+    is_crash_velocity = roc_20 < -19.0
+    is_crisis_regime = (is_long_term_downtrend and is_high_volatility) or is_crash_velocity or ("yield curve inversion" in context_lower) or ("systemic risk" in context_lower)
 
-    is_deeply_oversold = rsi < 25
-    is_extreme_crash_velocity = roc_20 < -22.0  # Added stricter velocity threshold
-    is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold and current_price < donchian_low_30 and (short_atr > long_atr * 1.2) and current_price < keltner_lower_band
+    is_deeply_oversold = rsi < 22
+    is_extreme_crash_velocity = roc_20 < -24.0
+    is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold and current_price < donchian_low_30 and (short_atr > long_atr * 1.3) and current_price < keltner_lower_band * 0.95
 
-    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 15 and ema_12 > ema_26 and sentiment_score > -1.5 and macd_hist_acceleration > 0 and signal_line[-1] < macd_histogram:
+    if is_capitulation_candidate and macd_hist_delta > 0.5 and stochastic_oscillator < 12 and ema_12 > ema_26 * 1.02 and sentiment_score > -1.2 and macd_hist_acceleration > 0.3 and signal_line[-1] < macd_histogram * 0.9:
         return "BUY"
 
     if is_crisis_regime:
-        is_recovering_from_oversold = rsi > 40 and macd_hist_delta > 0 and stochastic_oscillator > 85 and sentiment_score > -0.5
+        is_recovering_from_oversold = rsi > 45 and macd_hist_delta > 0.7 and stochastic_oscillator > 88 and sentiment_score > -0.3
         if is_recovering_from_oversold:
             return "BUY"
-        if macd_histogram < 0 or current_price < sma_50:
+        if macd_histogram < -0.5 or current_price < sma_50 * 0.98:
             return "SELL"
         return "HOLD"
 
-    base_stop_loss_factor = 0.88
+    base_stop_loss_factor = 0.87
     if is_extreme_volatility:
-        stop_loss_factor = 0.78  # Tightened from 0.80 to 0.78
+        stop_loss_factor = 0.76
     elif is_high_volatility:
-        stop_loss_factor = 0.83  # Tightened from 0.85 to 0.83
+        stop_loss_factor = 0.82
     else:
         stop_loss_factor = base_stop_loss_factor
 
-    atr_stop = keltner_lower_band + (short_atr * 0.5)
+    atr_stop = keltner_lower_band + (short_atr * 0.45)
     if current_price < atr_stop and current_price < donchian_high_30 * stop_loss_factor:
         return "SELL"
 
-    is_primary_downtrend = current_price < sma_50
-    is_momentum_confirming_down = macd_histogram < 0 and prev_macd_histogram >= 0
-    is_sentiment_permissive_for_sell = sentiment_score < 2.0
+    is_primary_downtrend = current_price < sma_50 * 0.99
+    is_momentum_confirming_down = macd_histogram < -0.3 and prev_macd_histogram >= 0
+    is_sentiment_permissive_for_sell = sentiment_score < 1.8
     if is_primary_downtrend and is_momentum_confirming_down and is_sentiment_permissive_for_sell:
         return "SELL"
 
-    is_momentum_fading = macd_hist_delta < 0
-    overbought_threshold = 85 if is_high_volatility else 82
+    is_momentum_fading = macd_hist_delta < -0.4
+    overbought_threshold = 87 if is_high_volatility else 84
     is_extremely_overbought = rsi > overbought_threshold
     if is_extremely_overbought and is_momentum_fading:
         return "SELL"
 
-    is_primary_uptrend = current_price > sma_50 and (sma_200 is None or current_price > sma_200)
-    is_momentum_confirming_up = macd_histogram > 0 and prev_macd_histogram <= 0
-    is_not_overbought = rsi < (75 if is_high_volatility else 72)
-    is_sentiment_permissive_for_buy = sentiment_score > -2.5
-    is_sufficient_volatility = short_atr > (long_atr * 0.6)
-    is_price_in_keltner_channel = current_price > keltner_lower_band and current_price < keltner_upper_band
-    is_ema_crossover = ema_12 is not None and ema_26 is not None and ema_12 > ema_26
-    is_bollinger_in_range = current_price > bollinger_lower and current_price < bollinger_upper
+    is_primary_uptrend = current_price > sma_50 * 1.01 and (sma_200 is None or current_price > sma_200 * 0.99)
+    is_momentum_confirming_up = macd_histogram > 0.4 and prev_macd_histogram <= 0
+    is_not_overbought = rsi < (76 if is_high_volatility else 73)
+    is_sentiment_permissive_for_buy = sentiment_score > -2.3
+    is_sufficient_volatility = short_atr > (long_atr * 0.65)
+    is_price_in_keltner_channel = current_price > keltner_lower_band * 1.02 and current_price < keltner_upper_band * 0.98
+    is_ema_crossover = ema_12 is not None and ema_26 is not None and ema_12 > ema_26 * 1.01
+    is_bollinger_in_range = current_price > bollinger_lower * 1.05 and current_price < bollinger_upper * 0.95
 
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_keltner_channel and is_bollinger_in_range and stochastic_oscillator > 30 and is_ema_crossover and macd_hist_acceleration > 0:
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_keltner_channel and is_bollinger_in_range and stochastic_oscillator > 35 and is_ema_crossover and macd_hist_acceleration > 0.2:
         return "BUY"
 
     return "HOLD"
