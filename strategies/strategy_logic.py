@@ -115,6 +115,12 @@ def calculate_stochastic_oscillator(prices, period=14):
     highest_high = np.max(prices[-period:])
     return ((prices[-1] - lowest_low) / (highest_high - lowest_low)) * 100
 
+def calculate_force_index(prices, volume):
+    """Calculates the Force Index (FI)."""
+    if len(prices) < 2 or len(volume) < 2:
+        return None
+    return np.sum(np.diff(prices) * np.diff(volume)) / len(volume)
+
 def decide(current_price, price_history, news_context):
     context_lower = news_context.lower()
     sentiment_keywords = {
@@ -143,6 +149,7 @@ def decide(current_price, price_history, news_context):
             net_sentiment_score += -weight if is_negated else weight
 
     all_prices = price_history + [current_price]
+    all_volumes = [0.0] * len(price_history) + [0.0]  # Replace with actual volume data
 
     # Dynamic scaling of indicators based on price history length
     sma_trend_long = max(100, len(all_prices) // 2)
@@ -152,9 +159,10 @@ def decide(current_price, price_history, news_context):
     atr_long = 50
     roc_crash_period = 20
     stop_loss_lookback = 30 
+    fi_period = 20
 
     required_history_length = max(sma_trend_long + 1, atr_long + 1, roc_crash_period + 1, rsi_period + 1, 
-                                  26 + 9 + 1, stop_loss_lookback + 1) 
+                                  26 + 9 + 1, stop_loss_lookback + 1, fi_period + 1) 
     if len(all_prices) < required_history_length:
         return "HOLD"
 
@@ -168,8 +176,9 @@ def decide(current_price, price_history, news_context):
     donchian_high_30 = np.max(all_prices[-stop_loss_lookback:]) if len(all_prices) >= stop_loss_lookback else None
     upper_band, lower_band = calculate_bollinger_bands(all_prices)
     stochastic_oscillator = calculate_stochastic_oscillator(all_prices)
+    fi = calculate_force_index(all_prices, all_volumes)
 
-    if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_30, upper_band, lower_band, stochastic_oscillator]) or \
+    if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_30, upper_band, lower_band, stochastic_oscillator, fi]) or \
        macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
 
