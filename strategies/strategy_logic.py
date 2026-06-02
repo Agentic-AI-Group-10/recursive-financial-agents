@@ -107,6 +107,14 @@ def calculate_bollinger_bands(prices, period=20, std_dev=2):
     lower_band = sma - std_dev * std
     return upper_band, lower_band
 
+def calculate_stochastic_oscillator(prices, period=14):
+    """Calculates the Stochastic Oscillator."""
+    if len(prices) < period:
+        return None
+    lowest_low = np.min(prices[-period:])
+    highest_high = np.max(prices[-period:])
+    return ((prices[-1] - lowest_low) / (highest_high - lowest_low)) * 100
+
 def decide(current_price, price_history, news_context):
     context_lower = news_context.lower()
     sentiment_keywords = {
@@ -159,8 +167,9 @@ def decide(current_price, price_history, news_context):
     roc_20 = calculate_roc(all_prices, roc_crash_period)
     donchian_high_30 = np.max(all_prices[-stop_loss_lookback:]) if len(all_prices) >= stop_loss_lookback else None
     upper_band, lower_band = calculate_bollinger_bands(all_prices)
+    stochastic_oscillator = calculate_stochastic_oscillator(all_prices)
 
-    if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_30, upper_band, lower_band]) or \
+    if any(v is None for v in [sma_100, sma_50, rsi, short_atr, long_atr, roc_20, donchian_high_30, upper_band, lower_band, stochastic_oscillator]) or \
        macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
 
@@ -179,11 +188,11 @@ def decide(current_price, price_history, news_context):
     is_extreme_crash_velocity = roc_20 < -18.0
     is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold
 
-    if is_capitulation_candidate and macd_hist_delta > 0: 
+    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 20: 
         return "BUY"
 
     if is_crisis_regime:
-        is_recovering_from_oversold = rsi > 35 and macd_hist_delta > 0 
+        is_recovering_from_oversold = rsi > 35 and macd_hist_delta > 0 and stochastic_oscillator > 80
         
         if is_recovering_from_oversold and net_sentiment_score > -1.0: 
             return "BUY"
@@ -222,7 +231,7 @@ def decide(current_price, price_history, news_context):
     is_sufficient_volatility = short_atr > (long_atr * 0.6) 
     is_price_in_bollinger_band = current_price > lower_band and current_price < upper_band
 
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_bollinger_band:
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_bollinger_band and stochastic_oscillator > 20:
         return "BUY"
 
     return "HOLD"
