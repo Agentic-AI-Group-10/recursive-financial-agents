@@ -134,7 +134,13 @@ def calculate_sentiment_score(news_context):
         "economic resilience": 2.5, "policy support": 2.6, "market confidence": 2.2,
         "bullish momentum": 2.4, "bearish momentum": -2.4, "market breadth contraction": -1.7,
         "valuation peak": -2.8, "valuation trough": 2.8, "liquidity contraction": -2.7,
-        "portfolio concentration": -1.8, "risk parity": 1.9
+        "portfolio concentration": -1.8, "risk parity": 1.9, "inflation easing": 2.9,
+        "central bank easing": 3.0, "monetary stimulus": 2.8, "fiscal expansion": 2.6,
+        "geopolitical stability": 2.4, "market breadth expansion": 2.2, "liquidity surge": 2.5,
+        "technical breakout": 2.6, "short covering": 2.8, "liquidity crunch": -2.9,
+        "margin squeeze": -2.8, "deleveraging": -2.6, "credit expansion": 2.4,
+        "policy clarity": 2.5, "market stability": 2.6, "economic resilience": 2.7,
+        "bullish momentum": 2.5, "bearish momentum": -2.5, "market breadth contraction": -1.8
     }
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent", "unlikely", "avoid", "no signs of", "unlikely to", "lack", "absence", "never", "none", "neglect", "without", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "never again", "no longer", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "without any", "lack any", "fail any", "struggle any", "prevent any", "avoid any", "unlikely any", "neglect any", "no longer any", "lack of any", "fail of any", "struggle of any", "prevent of any", "avoid of any", "unlikely of any", "neglect of any"]
     net_sentiment_score = 0.0
