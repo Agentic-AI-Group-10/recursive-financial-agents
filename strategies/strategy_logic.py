@@ -93,51 +93,28 @@ def calculate_keltner_channel(prices, period=20):
     lower_band = sma - (atr * 2)
     return upper_band, lower_band
 
-def calculate_adx(prices, period=14):
-    if len(prices) < period * 2 + 1:
-        return None
-    prices_arr = np.array(prices, dtype=float)
-    plus_dm = np.zeros(len(prices_arr) - 1)
-    minus_dm = np.zeros(len(prices_arr) - 1)
-    for i in range(1, len(prices_arr)):
-        up_move = prices_arr[i] - prices_arr[i-1]
-        down_move = prices_arr[i-1] - prices_arr[i]
-        plus_dm[i-1] = up_move if up_move > down_move and up_move > 0 else 0
-        minus_dm[i-1] = down_move if down_move > up_move and down_move > 0 else 0
-    
-    tr = np.abs(np.diff(prices_arr))
-    atr_series = calculate_ema_series(tr, period)
-    if atr_series is None or len(atr_series) < len(plus_dm):
-        return None
-    
-    plus_di = calculate_ema_series(plus_dm, period) / atr_series * 100
-    minus_di = calculate_ema_series(minus_dm, period) / atr_series * 100
-    dx = np.abs(plus_di - minus_di) / (plus_di + minus_di) * 100
-    adx = calculate_ema_series(dx, period)
-    return adx[-1] if len(adx) > 0 else None
-
 def calculate_sentiment_score(news_context):
     context_lower = news_context.lower()
     sentiment_keywords = {
-        "fed pivot": 3.0, "rate cut": 2.5, "quantitative easing": 2.5, "soft landing": 2.5,
-        "cooling inflation": 2.5, "cpi miss": 2.5, "ai boom": 2.5, "stimulus": 2.0,
-        "dovish": 2.0, "record high": 2.0, "bullish": 2.0, "strong earnings": 2.0,
-        "beat estimates": 1.5, "recovery": 1.5, "upgrade": 1.5, "de-escalation": 2.0,
-        "short squeeze": 3.5, "capitulation": 3.0, "panic selling": 2.5, "extreme fear": 2.0,
-        "strong jobs report": -0.5, 
-        "recession": -3.0, "crisis": -3.0, "stagflation": -3.0, "hot inflation": -3.0,
-        "war": -3.0, "yield curve inversion": -3.5, "quantitative tightening": -2.5,
-        "black swan": -4.0, "systemic risk": -4.0, "contagion": -3.5, "credit crunch": -3.5,
-        "rate hike": -2.5, "bankruptcy": -2.5, "hard landing": -2.5, "geopolitical risk": -2.5,
-        "cpi beat": -2.5, "vix spike": -2.5, "hawkish": -2.0, "bearish": -2.0,
-        "sell-off": -2.0, "weak earnings": -2.0, "market turmoil": -2.0, "bubble": -2.0,
-        "economic slowdown": -2.0, "market correction": -2.0, "regime shift": -3.0,
-        "uncertainty": -1.5,
-        "euphoria": -2.5, "mania": -3.0, "irrational exuberance": -3.0, "extreme greed": -2.5,
-        "market rebound": 2.5, "rebound potential": 2.0, "safe haven": 1.5,
-        "economic recovery": 2.0, "bull market": 2.0, "bear market": -2.0,
-        "inflation concerns": -1.0, "deflation risk": -2.0, "market breadth": 1.0,
-        "geopolitical stability": 2.0, "market resilience": 2.0
+        "fed pivot": 3.5, "rate cut": 3.0, "quantitative easing": 2.8, "soft landing": 2.8,
+        "cooling inflation": 2.7, "cpi miss": 2.6, "ai boom": 2.7, "stimulus": 2.2,
+        "dovish": 2.2, "record high": 2.1, "bullish": 2.1, "strong earnings": 2.1,
+        "beat estimates": 1.6, "recovery": 1.6, "upgrade": 1.6, "de-escalation": 2.2,
+        "short squeeze": 3.8, "capitulation": 3.3, "panic selling": 2.7, "extreme fear": 2.2,
+        "strong jobs report": -0.4, 
+        "recession": -3.2, "crisis": -3.2, "stagflation": -3.1, "hot inflation": -3.1,
+        "war": -3.2, "yield curve inversion": -3.6, "quantitative tightening": -2.6,
+        "black swan": -4.2, "systemic risk": -4.2, "contagion": -3.6, "credit crunch": -3.6,
+        "rate hike": -2.6, "bankruptcy": -2.6, "hard landing": -2.6, "geopolitical risk": -2.6,
+        "cpi beat": -2.6, "vix spike": -2.6, "hawkish": -2.1, "bearish": -2.1,
+        "sell-off": -2.1, "weak earnings": -2.1, "market turmoil": -2.1, "bubble": -2.1,
+        "economic slowdown": -2.1, "market correction": -2.1, "regime shift": -3.2,
+        "uncertainty": -1.6,
+        "euphoria": -2.6, "mania": -3.2, "irrational exuberance": -3.2, "extreme greed": -2.6,
+        "market rebound": 2.7, "rebound potential": 2.2, "safe haven": 1.6,
+        "economic recovery": 2.2, "bull market": 2.2, "bear market": -2.2,
+        "inflation concerns": -1.1, "deflation risk": -2.2, "market breadth": 1.1,
+        "geopolitical stability": 2.2, "market resilience": 2.2
     }
     negation_words = ["not", "no", "lack of", "fail to", "without", "struggle to", "avoids", "prevent", "unlikely", "avoid", "no signs of", "unlikely to", "lack", "absence", "never", "none", "neglect", "without", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect", "no longer", "never again", "no longer", "lack of", "fail to", "struggle to", "prevent", "avoid", "unlikely", "neglect"]
     net_sentiment_score = 0.0
@@ -150,7 +127,7 @@ def calculate_sentiment_score(news_context):
             if any(neg_word in post_context for neg_word in negation_words):
                 is_negated = not is_negated
             if is_negated:
-                weight *= 0.2  # Aggressive negation reduction
+                weight *= 0.25  # Reduce impact of negated terms
             net_sentiment_score += -weight if is_negated else weight
     return net_sentiment_score
 
@@ -181,9 +158,8 @@ def decide(current_price, price_history, news_context):
     donchian_high_30, donchian_low_30 = calculate_donchian_channel(all_prices, 30)
     stochastic_oscillator = calculate_stochastic_oscillator(all_prices)
     keltner_upper_band, keltner_lower_band = calculate_keltner_channel(all_prices)
-    adx = calculate_adx(all_prices)
 
-    if any(v is None for v in [sma_50, sma_200, ema_12, ema_26, ema_9, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, stochastic_oscillator, adx]) or \
+    if any(v is None for v in [sma_50, sma_200, ema_12, ema_26, ema_9, rsi, short_atr, long_atr, roc_20, donchian_high_30, donchian_low_30, stochastic_oscillator]) or \
        macd_hist_series is None or len(macd_hist_series) < 2:
         return "HOLD"
 
@@ -200,13 +176,13 @@ def decide(current_price, price_history, news_context):
 
     is_deeply_oversold = rsi < 30
     is_extreme_crash_velocity = roc_20 < -18.0
-    is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold and current_price < donchian_low_30 and (short_atr > long_atr * 1.2)
+    is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold and current_price < donchian_low_30 and (short_atr > long_atr * 1.2) and current_price < keltner_lower_band
 
-    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 20 and ema_12 > ema_26 and sentiment_score > -2.0 and adx > 25:
+    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 20 and ema_12 > ema_26 and sentiment_score > -2.0:
         return "BUY"
 
     if is_crisis_regime:
-        is_recovering_from_oversold = rsi > 35 and macd_hist_delta > 0 and stochastic_oscillator > 80 and sentiment_score > -1.0 and adx < 20
+        is_recovering_from_oversold = rsi > 35 and macd_hist_delta > 0 and stochastic_oscillator > 80 and sentiment_score > -1.0
         if is_recovering_from_oversold:
             return "BUY"
         if macd_histogram < 0 or current_price < sma_50:
@@ -221,7 +197,7 @@ def decide(current_price, price_history, news_context):
     else:
         stop_loss_factor = base_stop_loss_factor
 
-    if current_price < (donchian_high_30 * stop_loss_factor):
+    if current_price < (donchian_high_30 * stop_loss_factor) and current_price < keltner_upper_band:
         return "SELL"
 
     is_primary_downtrend = current_price < sma_50
@@ -243,9 +219,8 @@ def decide(current_price, price_history, news_context):
     is_sufficient_volatility = short_atr > (long_atr * 0.6)
     is_price_in_keltner_channel = current_price > keltner_lower_band and current_price < keltner_upper_band
     is_ema_crossover = ema_12 is not None and ema_26 is not None and ema_12 > ema_26
-    is_trend_strength = adx > 25
 
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_keltner_channel and stochastic_oscillator > 25 and is_ema_crossover and is_trend_strength:
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_keltner_channel and stochastic_oscillator > 25 and is_ema_crossover:
         return "BUY"
 
     return "HOLD"
