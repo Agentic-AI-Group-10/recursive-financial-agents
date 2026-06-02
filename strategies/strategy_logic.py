@@ -189,11 +189,11 @@ def decide(current_price, price_history, news_context):
     is_extreme_crash_velocity = roc_20 < -18.0
     is_capitulation_candidate = is_extreme_crash_velocity and is_deeply_oversold
 
-    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 20:
+    if is_capitulation_candidate and macd_hist_delta > 0 and stochastic_oscillator < 20 and current_price > keltner_lower_band:
         return "BUY"
 
     if is_crisis_regime:
-        is_recovering_from_oversold = rsi > 35 and macd_hist_delta > 0 and stochastic_oscillator > 80
+        is_recovering_from_oversold = rsi > 35 and macd_hist_delta > 0 and stochastic_oscillator > 80 and tenkan_sen > kijun_sen
         if is_recovering_from_oversold and sentiment_score > -1.0:
             return "BUY"
         if macd_histogram < 0 or current_price < sma_50:
@@ -230,8 +230,9 @@ def decide(current_price, price_history, news_context):
     is_price_in_bollinger_band = current_price > lower_band and current_price < upper_band
     is_price_in_keltner_channel = current_price > keltner_lower_band and current_price < keltner_upper_band
     is_ema_crossover = ema_20 is not None and ema_50 is not None and ema_20 > ema_50
+    is_ichimoku_bullish = tenkan_sen > kijun_sen and current_price > senkou_span_a and current_price > senkou_span_b
 
-    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_bollinger_band and is_price_in_keltner_channel and stochastic_oscillator > 20 and is_ema_crossover:
+    if is_primary_uptrend and is_momentum_confirming_up and is_not_overbought and is_sentiment_permissive_for_buy and is_sufficient_volatility and is_price_in_bollinger_band and is_price_in_keltner_channel and stochastic_oscillator > 20 and is_ema_crossover and is_ichimoku_bullish:
         return "BUY"
 
     return "HOLD"
