@@ -226,3 +226,5 @@ data/
 # Telemetry run artifacts and charts (keep the repository lean)
 telemetry/*.png
 telemetry/*.json
+telemetry_backup/
+
