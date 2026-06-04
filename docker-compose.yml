@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  db:
+    image: pgvector/pgvector:15-pgdg
+    container_name: rfa-postgres-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: secure_postgres_password_here
+      POSTGRES_DB: recursive_trading
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Automatically initialize database schema if empty on first boot
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    container_name: rfa-python-app
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8501:8501"
+      - "8080:8080"
+    environment:
+      - DATABASE_HOST=db
+      - DATABASE_USER=postgres
+      - DATABASE_PASSWORD=secure_postgres_password_here
+      - DATABASE_NAME=recursive_trading
+      - DATABASE_PORT=5432
+      # Pass through local host keys to the container
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - DEEPINFRA_API_KEY=${DEEPINFRA_API_KEY}
+    volumes:
+      - .:/app
+    # Run Streamlit dashboard by default
+    command: ["streamlit", "run", "dashboard.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
+
+volumes:
+  postgres_data:
