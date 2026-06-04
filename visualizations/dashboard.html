@@ -1,0 +1,1888 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recursive Financial Agents - Performance & Footprint Dashboard</title>
+    <!-- Premium Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <style>
+        :root {
+            --bg-primary: #080c14;
+            --bg-secondary: #0d1527;
+            --bg-card: rgba(17, 25, 44, 0.75);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --border-hover: rgba(59, 130, 246, 0.4);
+            
+            --text-primary: #f3f4f6;
+            --text-secondary: #9ca3af;
+            --text-muted: #6b7280;
+            
+            --accent-blue: #3b82f6;
+            --accent-blue-glow: rgba(59, 130, 246, 0.15);
+            --accent-purple: #8b5cf6;
+            --accent-purple-glow: rgba(139, 92, 246, 0.15);
+            --accent-green: #10b981;
+            --accent-green-glow: rgba(16, 185, 129, 0.15);
+            --accent-orange: #f59e0b;
+            --accent-orange-glow: rgba(245, 158, 11, 0.15);
+            --accent-red: #ef4444;
+            --accent-red-glow: rgba(239, 68, 68, 0.15);
+            
+            --transition-speed: 0.25s;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(circle at 10% 20%, rgba(59, 130, 246, 0.05) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(139, 92, 246, 0.05) 0%, transparent 40%);
+            background-attachment: fixed;
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--bg-primary);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #1f2937;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #374151;
+        }
+
+        header {
+            border-bottom: 1px solid var(--border-color);
+            background: rgba(8, 12, 20, 0.8);
+            backdrop-filter: blur(12px);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            padding: 16px 32px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon {
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            width: 38px;
+            height: 38px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            color: white;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+        }
+
+        .logo-text h1 {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 1.25rem;
+            font-weight: 700;
+            letter-spacing: -0.025em;
+            background: linear-gradient(to right, #ffffff, #9ca3af);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .logo-text p {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 1px;
+        }
+
+        .nav-tabs {
+            display: flex;
+            background: #111827;
+            padding: 4px;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+        }
+
+        .nav-tab {
+            padding: 8px 16px;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            font-family: 'Inter', sans-serif;
+            font-size: 0.875rem;
+            font-weight: 500;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all var(--transition-speed) ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .nav-tab:hover {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .nav-tab.active {
+            color: #ffffff;
+            background: var(--bg-secondary);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .meta-badges {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .badge {
+            background: rgba(59, 130, 246, 0.1);
+            color: var(--accent-blue);
+            border: 1px solid rgba(59, 130, 246, 0.2);
+            padding: 4px 10px;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .badge-purple {
+            background: rgba(139, 92, 246, 0.1);
+            color: var(--accent-purple);
+            border: 1px solid rgba(139, 92, 246, 0.2);
+        }
+
+        .main-container {
+            display: flex;
+            flex: 1;
+            padding: 24px;
+            gap: 24px;
+            max-width: 1600px;
+            width: 100%;
+            margin: 0 auto;
+        }
+
+        /* Filters Sidebar */
+        .sidebar {
+            width: 320px;
+            flex-shrink: 0;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 20px;
+            backdrop-filter: blur(12px);
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            height: calc(100vh - 120px);
+            position: sticky;
+            top: 96px;
+        }
+
+        .sidebar-title {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 1rem;
+            font-weight: 600;
+            letter-spacing: -0.01em;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .filter-section {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .filter-label {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+        }
+
+        /* Radio Pill Switcher */
+        .pill-switch {
+            display: flex;
+            background: #0b0f17;
+            padding: 3px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+
+        .pill-btn {
+            flex: 1;
+            padding: 6px 12px;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            font-weight: 500;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all var(--transition-speed) ease;
+        }
+
+        .pill-btn.active {
+            background: var(--accent-blue);
+            color: #white;
+            font-weight: 600;
+        }
+
+        /* Dropdown custom */
+        select.custom-select {
+            background: #0b0f17;
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            cursor: pointer;
+            width: 100%;
+            outline: none;
+            transition: border-color var(--transition-speed);
+        }
+
+        select.custom-select:focus {
+            border-color: var(--accent-blue);
+        }
+
+        /* Model Multi-select list */
+        .model-list-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            overflow-y: auto;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: #0b0f17;
+            padding: 10px;
+        }
+
+        .model-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 8px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            transition: all var(--transition-speed) ease;
+        }
+
+        .model-item:hover {
+            background: rgba(255, 255, 255, 0.03);
+            color: var(--text-primary);
+        }
+
+        .model-item input[type="checkbox"] {
+            accent-color: var(--accent-blue);
+            cursor: pointer;
+        }
+
+        .bulk-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .bulk-btn {
+            flex: 1;
+            padding: 5px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            background: #111827;
+            color: var(--text-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all var(--transition-speed);
+        }
+
+        .bulk-btn:hover {
+            color: var(--text-primary);
+            border-color: var(--text-muted);
+        }
+
+        /* Content Area */
+        .content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .tab-panel {
+            display: none;
+            flex-direction: column;
+            gap: 24px;
+            animation: fadeIn 0.35s ease-out;
+        }
+
+        .tab-panel.active {
+            display: flex;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Grid stats cards */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 20px;
+            backdrop-filter: blur(12px);
+            transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+        }
+
+        .card-glow-blue::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; height: 3px;
+            background: linear-gradient(to right, var(--accent-blue), transparent);
+        }
+        .card-glow-green::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; height: 3px;
+            background: linear-gradient(to right, var(--accent-green), transparent);
+        }
+        .card-glow-purple::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; height: 3px;
+            background: linear-gradient(to right, var(--accent-purple), transparent);
+        }
+        .card-glow-orange::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; height: 3px;
+            background: linear-gradient(to right, var(--accent-orange), transparent);
+        }
+
+        .card-header-inner {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .card-title {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+        }
+
+        .card-icon {
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .card-value {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 1.625rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            margin-bottom: 6px;
+        }
+
+        .card-sub {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .chart-container {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 24px;
+            backdrop-filter: blur(12px);
+            position: relative;
+        }
+
+        .chart-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .chart-header-title h3 {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 1.125rem;
+            font-weight: 600;
+            letter-spacing: -0.01em;
+        }
+
+        .chart-header-title p {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        /* Leaderboard table */
+        .table-card {
+            padding: 0;
+            overflow: hidden;
+        }
+
+        .table-container {
+            width: 100%;
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            font-size: 0.85rem;
+        }
+
+        th {
+            background: rgba(13, 21, 39, 0.4);
+            padding: 14px 20px;
+            color: var(--text-secondary);
+            font-weight: 600;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            cursor: pointer;
+            user-select: none;
+            transition: background var(--transition-speed);
+        }
+
+        th:hover {
+            background: rgba(13, 21, 39, 0.8);
+            color: white;
+        }
+
+        th.sorted-asc::after {
+            content: ' ▲';
+            font-size: 0.65rem;
+        }
+
+        th.sorted-desc::after {
+            content: ' ▼';
+            font-size: 0.65rem;
+        }
+
+        td {
+            padding: 14px 20px;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            font-family: 'Inter', sans-serif;
+        }
+
+        tr {
+            transition: background var(--transition-speed);
+        }
+
+        tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+            color: white;
+        }
+
+        .model-cell {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .provider-tag {
+            font-size: 0.65rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        .provider-google {
+            background: rgba(66, 133, 244, 0.15);
+            color: #4285f4;
+            border: 1px solid rgba(66, 133, 244, 0.25);
+        }
+
+        .provider-deepinfra {
+            background: rgba(139, 92, 246, 0.15);
+            color: #c084fc;
+            border: 1px solid rgba(139, 92, 246, 0.25);
+        }
+
+        .trend-up {
+            color: var(--accent-green);
+            font-weight: 600;
+        }
+
+        .trend-down {
+            color: var(--accent-red);
+            font-weight: 600;
+        }
+
+        .mono {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+        }
+
+        /* Image gallery for static plots */
+        .plots-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+        }
+
+        .plot-container {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .plot-container.full-width {
+            grid-column: span 2;
+        }
+
+        .plot-img {
+            width: 100%;
+            height: auto;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            background: #0d1117;
+            transition: transform 0.3s ease;
+        }
+
+        .plot-img:hover {
+            transform: scale(1.01);
+            cursor: zoom-in;
+        }
+
+        .plot-meta {
+            padding: 4px;
+        }
+
+        .plot-meta h4 {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 0.95rem;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .plot-meta p {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            line-height: 1.4;
+        }
+
+        /* Detail Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.85);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            padding: 40px;
+            backdrop-filter: blur(8px);
+        }
+
+        .modal-content {
+            max-width: 90%;
+            max-height: 90%;
+            position: relative;
+        }
+
+        .modal-img {
+            max-width: 100%;
+            max-height: 100%;
+            border-radius: 12px;
+            box-shadow: 0 10px 50px rgba(0,0,0,0.8);
+            border: 1px solid var(--border-color);
+        }
+
+        .close-btn {
+            position: absolute;
+            top: -40px; right: 0;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            background: transparent;
+            border: none;
+        }
+
+        .close-btn:hover {
+            color: var(--accent-red);
+        }
+
+        /* Explanation Box */
+        .info-box {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.05) 0%, rgba(139, 92, 246, 0.05) 100%);
+            border: 1px solid rgba(59, 130, 246, 0.15);
+            border-radius: 12px;
+            padding: 16px;
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+            font-size: 0.8rem;
+            line-height: 1.5;
+            color: var(--text-secondary);
+        }
+
+        .info-box-icon {
+            color: var(--accent-blue);
+            font-size: 1.2rem;
+            line-height: 1;
+        }
+
+        .info-box-title {
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 2px;
+        }
+        
+        /* Dual Metric Toggle */
+        .metric-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+            background: rgba(13, 21, 39, 0.4);
+            padding: 4px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+
+        .metric-tab-btn {
+            flex: 1;
+            padding: 6px;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            font-weight: 500;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all var(--transition-speed);
+        }
+
+        .metric-tab-btn.active {
+            background: #111827;
+            color: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+        }
+
+        /* Responsive Design */
+        @media (max-width: 1200px) {
+            .main-container {
+                flex-direction: column;
+            }
+            .sidebar {
+                width: 100%;
+                height: auto;
+                position: static;
+            }
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .plots-grid {
+                grid-template-columns: 1fr;
+            }
+            .plot-container.full-width {
+                grid-column: span 1;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="logo-container">
+            <div class="logo-icon">f</div>
+            <div class="logo-text">
+                <h1>Recursive Financial Agents</h1>
+                <p>Evolutionary Performance & Hardware Footprint Analytics</p>
+            </div>
+        </div>
+
+        <div class="nav-tabs">
+            <button class="nav-tab active" onclick="switchTab('overview')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
+                Overview
+            </button>
+            <button class="nav-tab" onclick="switchTab('evolution')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
+                Financial & AROI Evolution
+            </button>
+            <button class="nav-tab" onclick="switchTab('energy')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                Energy & Carbon Cost
+            </button>
+            <button class="nav-tab" onclick="switchTab('leaderboard')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path></svg>
+                Model Leaderboard
+            </button>
+            <button class="nav-tab" onclick="switchTab('static-plots')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                Static Reports
+            </button>
+        </div>
+
+        <div class="meta-badges">
+            <div class="badge">
+                <span style="display:inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent-green)"></span>
+                Active Environment
+            </div>
+            <div class="badge badge-purple">
+                ⏱️ 27h Runs Complete
+            </div>
+        </div>
+    </header>
+
+    <div class="main-container">
+        <!-- Sidebar Controls (shared dynamically) -->
+        <div class="sidebar" id="sidebar-panel">
+            <div class="sidebar-title">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
+                Analysis Controls
+            </div>
+
+            <div class="filter-section">
+                <span class="filter-label">Market Evaluation Regime</span>
+                <div class="pill-switch" id="regime-switch">
+                    <button class="pill-btn active" onclick="setRegime('Normal')">Normal</button>
+                    <button class="pill-btn" onclick="setRegime('Stress')">Stress Regime</button>
+                </div>
+            </div>
+
+            <div class="filter-section" id="metric-select-section" style="display: none;">
+                <span class="filter-label">Comparison Metric</span>
+                <select id="metric-selector" class="custom-select" onchange="updateCharts()">
+                    <option value="total_return_pct">Total Return %</option>
+                    <option value="efficiency_score_aroi">Agentic ROI (AROI)</option>
+                    <option value="sharpe_ratio_annualized">Sharpe Ratio</option>
+                    <option value="max_drawdown_pct">Max Drawdown %</option>
+                    <option value="net_profit_loss_usd">Net Profit/Loss (USD)</option>
+                </select>
+            </div>
+
+            <div class="filter-section" style="flex: 1; display: flex; flex-direction: column;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                    <span class="filter-label">Filter Models (12 Total)</span>
+                    <div class="bulk-actions">
+                        <button class="bulk-btn" onclick="toggleAllModels(true)">All</button>
+                        <button class="bulk-btn" onclick="toggleAllModels(false)">None</button>
+                        <button class="bulk-btn" onclick="selectTopModels()">Top 4</button>
+                    </div>
+                </div>
+                <div class="model-list-container" id="model-checkbox-list">
+                    <!-- Loaded Dynamically -->
+                </div>
+            </div>
+
+            <div class="info-box">
+                <span class="info-box-icon">ℹ️</span>
+                <div>
+                    <div class="info-box-title">What is Agentic ROI (AROI)?</div>
+                    The AROI ratio measures the financial return generated by an agent divided by its complete computational footprint (incorporating physical energy consumed in Joules, carbon offsetting costs, and LLM token API expenses). High AROI indicates a highly optimized, capital-efficient, green agent.
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content Panel -->
+        <div class="content">
+            
+            <!-- TAB 1: OVERVIEW -->
+            <div id="panel-overview" class="tab-panel active">
+                <div class="stats-grid">
+                    <div class="card card-glow-blue">
+                        <div class="card-header-inner">
+                            <span class="card-title">Top Return Champion</span>
+                            <div class="card-icon" style="background: rgba(59, 130, 246, 0.1); color: var(--accent-blue)">🏆</div>
+                        </div>
+                        <div class="card-value mono text-primary" id="stat-ret-champ-val">+0.00%</div>
+                        <div class="card-sub" id="stat-ret-champ-name">Loading...</div>
+                    </div>
+
+                    <div class="card card-glow-green">
+                        <div class="card-header-inner">
+                            <span class="card-title">AROI Efficiency Champ</span>
+                            <div class="card-icon" style="background: rgba(16, 185, 129, 0.1); color: var(--accent-green)">🌿</div>
+                        </div>
+                        <div class="card-value mono" id="stat-aroi-champ-val">0.0000</div>
+                        <div class="card-sub" id="stat-aroi-champ-name">Loading...</div>
+                    </div>
+
+                    <div class="card card-glow-orange">
+                        <div class="card-header-inner">
+                            <span class="card-title">Greenest Agent</span>
+                            <div class="card-icon" style="background: rgba(245, 158, 11, 0.1); color: var(--accent-orange)">⚡</div>
+                        </div>
+                        <div class="card-value mono" id="stat-green-champ-val">0.0 J</div>
+                        <div class="card-sub" id="stat-green-champ-name">Loading...</div>
+                    </div>
+
+                    <div class="card card-glow-purple">
+                        <div class="card-header-inner">
+                            <span class="card-title">Total Project Footprint</span>
+                            <div class="card-icon" style="background: rgba(139, 92, 246, 0.1); color: var(--accent-purple)">🌐</div>
+                        </div>
+                        <div class="card-value mono" id="stat-total-footprint">0.00 MJ</div>
+                        <div class="card-sub" id="stat-total-cost">Loading...</div>
+                    </div>
+                </div>
+
+                <!-- Main dashboard summary chart -->
+                <div class="chart-container">
+                    <div class="chart-header">
+                        <div class="chart-header-title">
+                            <h3>Financial Return vs. Agentic ROI Trade-off</h3>
+                            <p>Plotting cumulative returns against AROI efficiency to identify Pareto-optimal LLM models.</p>
+                        </div>
+                    </div>
+                    <div style="height: 400px; position: relative;">
+                        <canvas id="overviewScatterChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <div class="chart-header">
+                        <div class="chart-header-title">
+                            <h3>LLM Safety Guardrail Efficiency Impact</h3>
+                            <p>Comparing Filtered vs Unfiltered models across Peak Normal Return & Cumulative Energy Costs.</p>
+                        </div>
+                    </div>
+                    <div style="height: 350px; position: relative;">
+                        <canvas id="overviewBarChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 2: FINANCIAL & AROI EVOLUTION -->
+            <div id="panel-evolution" class="tab-panel">
+                <div class="chart-container">
+                    <div class="chart-header">
+                        <div class="chart-header-title">
+                            <h3>Generational Strategy Trajectory</h3>
+                            <p>Track the recursive self-improvement of agents across generations.</p>
+                        </div>
+                        <div class="metric-tabs">
+                            <button id="btn-ret-evolution" class="metric-tab-btn active" onclick="setEvolutionMetric('total_return_pct')">Strategy Return %</button>
+                            <button id="btn-aroi-evolution" class="metric-tab-btn" onclick="setEvolutionMetric('efficiency_score_aroi')">Agentic ROI (AROI)</button>
+                            <button id="btn-draw-evolution" class="metric-tab-btn" onclick="setEvolutionMetric('max_drawdown_pct')">Max Drawdown %</button>
+                        </div>
+                    </div>
+                    <div style="height: 480px; position: relative;">
+                        <canvas id="evolutionLineChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 3: ENERGY FOOTPRINT -->
+            <div id="panel-energy" class="tab-panel">
+                <div class="stats-grid">
+                    <div class="card" style="background: rgba(13, 21, 39, 0.5)">
+                        <div class="card-title">Total Compute Energy</div>
+                        <div class="card-value mono" id="energy-sum-joules" style="color: var(--accent-orange)">0.00 MJ</div>
+                        <div class="card-sub">Joules consumed in strategy backtesting</div>
+                    </div>
+                    <div class="card" style="background: rgba(13, 21, 39, 0.5)">
+                        <div class="card-title">Environmental Carbon Offset</div>
+                        <div class="card-value mono" id="energy-sum-carbon-usd" style="color: var(--accent-red)">$0.000</div>
+                        <div class="card-sub">Equivalent USD required to offset footprints</div>
+                    </div>
+                    <div class="card" style="background: rgba(13, 21, 39, 0.5)">
+                        <div class="card-title">LLM API Call Costs</div>
+                        <div class="card-value mono" id="energy-sum-compute-usd" style="color: var(--accent-blue)">$0.00</div>
+                        <div class="card-sub">Total API prompt and completion costs</div>
+                    </div>
+                    <div class="card" style="background: rgba(13, 21, 39, 0.5)">
+                        <div class="card-title">Energy-to-Alpha Ratio</div>
+                        <div class="card-value mono" id="energy-efficiency-ratio" style="color: var(--accent-green)">0.00%</div>
+                        <div class="card-sub">Average return generated per Megajoule</div>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <div class="chart-header">
+                        <div class="chart-header-title">
+                            <h3>Cumulative Backtest Hardware Footprint</h3>
+                            <p>Accumulated hardware energy cost (USD) vs cumulative computational Joules across evolutionary generations.</p>
+                        </div>
+                    </div>
+                    <div style="height: 400px; position: relative;">
+                        <canvas id="cumulativeEnergyChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 4: LEADERBOARD -->
+            <div id="panel-leaderboard" class="tab-panel">
+                <div class="card table-card">
+                    <div class="table-container">
+                        <table id="leaderboard-table">
+                            <thead>
+                                <tr>
+                                    <th onclick="sortTable(0)">Model Name</th>
+                                    <th onclick="sortTable(1)" class="mono">Peak Return</th>
+                                    <th onclick="sortTable(2)" class="mono">Sharpe Ratio</th>
+                                    <th onclick="sortTable(3)" class="mono">Max Drawdown</th>
+                                    <th onclick="sortTable(4)" class="mono">Total Energy</th>
+                                    <th onclick="sortTable(5)" class="mono">Energy Cost</th>
+                                    <th onclick="sortTable(6)" class="mono">API Cost</th>
+                                    <th onclick="sortTable(7)" class="mono">Peak AROI</th>
+                                </tr>
+                            </thead>
+                            <tbody id="leaderboard-tbody">
+                                <!-- Loaded Dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 5: STATIC VISUALIZATIONS -->
+            <div id="panel-static-plots" class="tab-panel">
+                <div class="plots-grid">
+                    <div class="plot-container">
+                        <img src="return_and_aroi_evolution.png" alt="Return and AROI Evolution" class="plot-img" onclick="openModal(this.src)">
+                        <div class="plot-meta">
+                            <h4>💸 Return and AROI Trajectory (High-Fidelity)</h4>
+                            <p>Tracks how Strategy Return and AROI scale over sequential self-correction loops. Uses log-scaling on the right axis to capture high-order divergence in Gemini models.</p>
+                        </div>
+                    </div>
+
+                    <div class="plot-container">
+                        <img src="energy_and_cost_evolution.png" alt="Energy and Cost Evolution" class="plot-img" onclick="openModal(this.src)">
+                        <div class="plot-meta">
+                            <h4>⚡ Hardware Energy & Cost Accumulation</h4>
+                            <p>Tracks the cumulative power utilization in Joules alongside raw USD cost. Demonstrates the compounding environmental overhead generated by heavily nested code revisions.</p>
+                        </div>
+                    </div>
+
+                    <div class="plot-container full-width">
+                        <img src="cross_model_bar_comparison.png" alt="Cross-Model Bar Comparison" class="plot-img" onclick="openModal(this.src)">
+                        <div class="plot-meta">
+                            <h4>📊 Cross-Model Megajoule & Financial Performance</h4>
+                            <p>Detailed bar-by-bar comparative review mapping Peak Normal Return % against cumulative Joules utilized for all 12 model trials in a standard standardized visualization.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Image Modal -->
+    <div id="image-modal" class="modal" onclick="closeModal()">
+        <button class="close-btn" onclick="closeModal()">✕ Close</button>
+        <div class="modal-content">
+            <img class="modal-img" id="modal-img-src">
+        </div>
+    </div>
+
+    <!-- MAIN DASHBOARD SCRIPT -->
+    <script>
+        // Global State Variables
+        let rawData = null;
+        let selectedRegime = 'Normal';
+        let selectedModels = [];
+        let activeTab = 'overview';
+        let currentEvolutionMetric = 'total_return_pct';
+        let sortCol = 1; // Default Sort column: Peak Return
+        let sortAsc = false; // Default Sort: descending
+        
+        // Active Chart References
+        let overviewScatterChartRef = null;
+        let overviewBarChartRef = null;
+        let evolutionLineChartRef = null;
+        let cumulativeEnergyChartRef = null;
+
+        // Distinct styling colors for the models (highly readable palettes)
+        const modelColors = {
+            "google/gemini-2.5-pro (filtered)": "#3b82f6",
+            "google/gemini-2.5-pro (unfiltered)": "#ef4444",
+            "deepinfra/Qwen_Qwen2.5-Coder-32B-Instruct (filtered)": "#10b981",
+            "google/gemini-2.5-flash (unfiltered)": "#8b5cf6",
+            "google/gemini-2.5-flash (filtered)": "#f59e0b",
+            "deepinfra/meta-llama_Llama-3.3-70B-Instruct (filtered)": "#06b6d4",
+            "deepinfra/Qwen_Qwen2.5-72B-Instruct (filtered)": "#ec4899",
+            "deepinfra/meta-llama_Meta-Llama-3.1-8B-Instruct (filtered)": "#14b8a6",
+            "deepinfra/deepseek-ai_DeepSeek-V3_filtered": "#6366f1",
+            "deepinfra/deepseek-ai_DeepSeek-Coder-V2-Instruct_filtered": "#84cc16",
+            "deepinfra/THUDM_glm-4-9b-chat_filtered": "#f43f5e",
+            "deepinfra/moonshotai_Kimi-K2.5_filtered": "#a855f7"
+        };
+        
+        const fallbackColors = [
+            "#3b82f6", "#ef4444", "#10b981", "#8b5cf6", "#f59e0b",
+            "#06b6d4", "#ec4899", "#14b8a6", "#6366f1", "#eab308",
+            "#f43f5e", "#a855f7", "#00ffff"
+        ];
+
+        // Fetch Data from JSON File
+        document.addEventListener("DOMContentLoaded", () => {
+            fetch('all_trials_data.json')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error("HTTP error " + response.status);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    rawData = data;
+                    initializeDashboard();
+                })
+                .catch(error => {
+                    console.error("Could not load data:", error);
+                    alert("Unable to fetch all_trials_data.json. Please ensure the Python extraction script has successfully run and dashboard.html is served from the visualizations directory.");
+                });
+        });
+
+        function initializeDashboard() {
+            // 1. Populate model lists
+            const listContainer = document.getElementById("model-checkbox-list");
+            listContainer.innerHTML = "";
+
+            const modelKeys = Object.keys(rawData).sort();
+            
+            // Set default models to show (let's pick top ones + some others)
+            const defaultModels = [
+                "google/gemini-2.5-pro (filtered)",
+                "google/gemini-2.5-pro (unfiltered)",
+                "deepinfra/Qwen_Qwen2.5-Coder-32B-Instruct (filtered)",
+                "google/gemini-2.5-flash (unfiltered)"
+            ];
+            
+            selectedModels = [...defaultModels].filter(m => modelKeys.includes(m));
+            if (selectedModels.length === 0) {
+                // Fallback to top 4 alphabetically
+                selectedModels = modelKeys.slice(0, 4);
+            }
+
+            modelKeys.forEach((mKey, idx) => {
+                const checked = selectedModels.includes(mKey) ? "checked" : "";
+                const shortLabel = mKey.replace("google/", "G: ").replace("deepinfra/", "D: ");
+                
+                const item = document.createElement("div");
+                item.className = "model-item";
+                
+                // Color box indicator
+                const mColor = modelColors[mKey] || fallbackColors[idx % fallbackColors.length];
+                
+                item.innerHTML = `
+                    <input type="checkbox" id="chk-${idx}" value="${mKey}" ${checked} onchange="onModelCheckboxChanged(this)">
+                    <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background-color:${mColor}"></span>
+                    <label for="chk-${idx}" style="cursor:pointer; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${mKey}">${shortLabel}</label>
+                `;
+                listContainer.appendChild(item);
+            });
+
+            // 2. Compute Champion Stats
+            computeChampions();
+
+            // 3. Render Dashboard Elements
+            updateCharts();
+            renderLeaderboard();
+        }
+
+        // Checkbox events
+        function onModelCheckboxChanged(checkbox) {
+            const val = checkbox.value;
+            if (checkbox.checked) {
+                if (!selectedModels.includes(val)) selectedModels.push(val);
+            } else {
+                selectedModels = selectedModels.filter(m => m !== val);
+            }
+            updateCharts();
+        }
+
+        function toggleAllModels(select) {
+            selectedModels = [];
+            const checkboxes = document.querySelectorAll("#model-checkbox-list input[type='checkbox']");
+            checkboxes.forEach(cb => {
+                cb.checked = select;
+                if (select) {
+                    selectedModels.push(cb.value);
+                }
+            });
+            updateCharts();
+        }
+
+        function selectTopModels() {
+            const topModels = [
+                "google/gemini-2.5-pro (filtered)",
+                "google/gemini-2.5-pro (unfiltered)",
+                "deepinfra/Qwen_Qwen2.5-Coder-32B-Instruct (filtered)",
+                "google/gemini-2.5-flash (unfiltered)"
+            ];
+            
+            selectedModels = [];
+            const checkboxes = document.querySelectorAll("#model-checkbox-list input[type='checkbox']");
+            checkboxes.forEach(cb => {
+                const val = cb.value;
+                const isTop = topModels.includes(val);
+                cb.checked = isTop;
+                if (isTop) {
+                    selectedModels.push(val);
+                }
+            });
+            updateCharts();
+        }
+
+        // Tab Management
+        function switchTab(tabId) {
+            activeTab = tabId;
+            
+            // Update nav styles
+            const tabs = document.querySelectorAll(".nav-tab");
+            tabs.forEach(t => t.classList.remove("active"));
+            
+            // Find active button
+            const tabButtons = Array.from(tabs);
+            const targetBtn = tabButtons.find(b => b.textContent.toLowerCase().includes(tabId.replace("-", " ")));
+            if (targetBtn) targetBtn.classList.add("active");
+            else {
+                // exact matching
+                if (tabId === 'static-plots') tabButtons[4].classList.add("active");
+                if (tabId === 'leaderboard') tabButtons[3].classList.add("active");
+                if (tabId === 'energy') tabButtons[2].classList.add("active");
+                if (tabId === 'evolution') tabButtons[1].classList.add("active");
+                if (tabId === 'overview') tabButtons[0].classList.add("active");
+            }
+
+            // Show active panel
+            const panels = document.querySelectorAll(".tab-panel");
+            panels.forEach(p => p.classList.remove("active"));
+            document.getElementById(`panel-${tabId}`).classList.add("active");
+
+            // Show/Hide sidebar controls based on relevance
+            const sidebar = document.getElementById("sidebar-panel");
+            const metricSection = document.getElementById("metric-select-section");
+            
+            if (tabId === 'overview' || tabId === 'static-plots') {
+                metricSection.style.display = 'none';
+            } else {
+                metricSection.style.display = 'none'; // we have custom selectors or handle dynamically
+            }
+
+            if (tabId === 'static-plots' || tabId === 'leaderboard') {
+                sidebar.style.opacity = '0.5';
+                sidebar.style.pointerEvents = 'none';
+            } else {
+                sidebar.style.opacity = '1';
+                sidebar.style.pointerEvents = 'auto';
+            }
+
+            // Force charts resize/re-render to prevent zero-width issues
+            setTimeout(() => {
+                if (overviewScatterChartRef) overviewScatterChartRef.resize();
+                if (overviewBarChartRef) overviewBarChartRef.resize();
+                if (evolutionLineChartRef) evolutionLineChartRef.resize();
+                if (cumulativeEnergyChartRef) cumulativeEnergyChartRef.resize();
+            }, 50);
+        }
+
+        // Regime toggle
+        function setRegime(regime) {
+            selectedRegime = regime;
+            const buttons = document.querySelectorAll("#regime-switch .pill-btn");
+            buttons.forEach(btn => {
+                if (btn.textContent.trim().includes(regime)) {
+                    btn.classList.add("active");
+                } else {
+                    btn.classList.remove("active");
+                }
+            });
+            computeChampions();
+            updateCharts();
+            renderLeaderboard();
+        }
+
+        function setEvolutionMetric(metric) {
+            currentEvolutionMetric = metric;
+            const buttons = document.querySelectorAll(".metric-tabs .metric-tab-btn");
+            buttons.forEach(btn => {
+                btn.classList.remove("active");
+            });
+            
+            if (metric === 'total_return_pct') document.getElementById("btn-ret-evolution").classList.add("active");
+            if (metric === 'efficiency_score_aroi') document.getElementById("btn-aroi-evolution").classList.add("active");
+            if (metric === 'max_drawdown_pct') document.getElementById("btn-draw-evolution").classList.add("active");
+            
+            updateEvolutionLineChart();
+        }
+
+        // Computation helpers
+        function computeChampions() {
+            let topReturn = -Infinity;
+            let topReturnName = "";
+            
+            let topAROI = -Infinity;
+            let topAROIName = "";
+            
+            let greenestVal = Infinity;
+            let greenestName = "";
+            
+            let grandTotalJoules = 0;
+            let grandTotalCarbonCost = 0;
+            let grandTotalComputeCost = 0;
+
+            Object.entries(rawData).forEach(([mKey, mVal]) => {
+                const traj = mVal["trajectory"];
+                
+                // Track total footprints across both regimes
+                let modelJoulesSum = 0;
+                let modelCarbonSum = 0;
+                let modelComputeSum = 0;
+                
+                traj.forEach(t => {
+                    modelJoulesSum += t["total_energy_joules"];
+                    modelCarbonSum += t["energy_cost_usd"];
+                    modelComputeSum += t["total_compute_cost_usd"];
+                });
+
+                grandTotalJoules += modelJoulesSum;
+                grandTotalCarbonCost += modelCarbonSum;
+                grandTotalComputeCost += modelComputeSum;
+
+                if (modelJoulesSum < greenestVal && modelJoulesSum > 0) {
+                    greenestVal = modelJoulesSum;
+                    greenestName = mKey;
+                }
+
+                // Regime specific calculations
+                const regimeTraj = traj.filter(t => t["regime"] === selectedRegime);
+                regimeTraj.forEach(t => {
+                    if (t["total_return_pct"] > topReturn) {
+                        topReturn = t["total_return_pct"];
+                        topReturnName = `${mKey} (Gen ${t["generation"]})`;
+                    }
+                    if (t["efficiency_score_aroi"] > topAROI) {
+                        topAROI = t["efficiency_score_aroi"];
+                        topAROIName = `${mKey} (Gen ${t["generation"]})`;
+                    }
+                });
+            });
+
+            // Update top cards
+            document.getElementById("stat-ret-champ-val").textContent = `${topReturn > 0 ? '+' : ''}${topReturn.toFixed(2)}%`;
+            document.getElementById("stat-ret-champ-name").textContent = topReturnName || "No runs found";
+            
+            document.getElementById("stat-aroi-champ-val").textContent = topAROI.toExponential(4);
+            document.getElementById("stat-aroi-champ-name").textContent = topAROIName || "No runs found";
+            
+            document.getElementById("stat-green-champ-val").textContent = greenestVal < Infinity ? `${(greenestVal / 1000.0).toFixed(2)} KJ` : "0 J";
+            document.getElementById("stat-green-champ-name").textContent = greenestName ? greenestName.replace(" (filtered)", "").replace(" (unfiltered)", "") : "No runs found";
+            
+            document.getElementById("stat-total-footprint").textContent = `${(grandTotalJoules / 1000000.0).toFixed(2)} MJ`;
+            document.getElementById("stat-total-cost").textContent = `Offset: $${grandTotalCarbonCost.toFixed(3)} | API: $${grandTotalComputeCost.toFixed(2)}`;
+
+            // Energy Tab Stats
+            document.getElementById("energy-sum-joules").textContent = `${(grandTotalJoules / 1000000.0).toFixed(2)} MJ`;
+            document.getElementById("energy-sum-carbon-usd").textContent = `$${grandTotalCarbonCost.toFixed(4)}`;
+            document.getElementById("energy-sum-compute-usd").textContent = `$${grandTotalComputeCost.toFixed(2)}`;
+            
+            // Total alpha generated / total megajoules (aggregate return of selected items)
+            let selectedReturnsSum = 0;
+            let selectedMJSum = 0;
+            selectedModels.forEach(mKey => {
+                if (rawData[mKey]) {
+                    const normTraj = rawData[mKey]["trajectory"].filter(t => t["regime"] === "Normal");
+                    if (normTraj.length > 0) {
+                        selectedReturnsSum += Math.max(...normTraj.map(t => t["total_return_pct"]));
+                    }
+                    selectedMJSum += rawData[mKey]["trajectory"].reduce((s, t) => s + t["total_energy_joules"], 0) / 1000000.0;
+                }
+            });
+            const energyAlphaRatio = selectedMJSum > 0 ? (selectedReturnsSum / selectedMJSum) : 0;
+            document.getElementById("energy-efficiency-ratio").textContent = `${energyAlphaRatio.toFixed(2)}% Return/MJ`;
+        }
+
+        // Main Draw Trigger
+        function updateCharts() {
+            if (!rawData) return;
+            
+            updateOverviewScatterChart();
+            updateOverviewBarChart();
+            updateEvolutionLineChart();
+            updateCumulativeEnergyChart();
+        }
+
+        // ==========================================
+        // CHART 1: Overview Scatter Chart (Return vs AROI)
+        // ==========================================
+        function updateOverviewScatterChart() {
+            const ctx = document.getElementById("overviewScatterChart").getContext("2d");
+            
+            // Build Scatter Data
+            const datasets = selectedModels.map((mKey, idx) => {
+                const modelVal = rawData[mKey];
+                const regimeTraj = modelVal["trajectory"].filter(t => t["regime"] === selectedRegime);
+                
+                const points = regimeTraj.map(t => ({
+                    x: t["efficiency_score_aroi"],
+                    y: t["total_return_pct"],
+                    generation: t["generation"]
+                }));
+
+                const mColor = modelColors[mKey] || fallbackColors[idx % fallbackColors.length];
+                
+                return {
+                    label: mKey.replace("google/", "").replace("deepinfra/", ""),
+                    data: points,
+                    backgroundColor: mColor,
+                    borderColor: mColor,
+                    pointRadius: 6,
+                    pointHoverRadius: 9,
+                    showLine: true,
+                    borderWidth: 1.5,
+                    borderDash: [3, 3]
+                };
+            });
+
+            if (overviewScatterChartRef) {
+                overviewScatterChartRef.destroy();
+            }
+
+            overviewScatterChartRef = new Chart(ctx, {
+                type: 'scatter',
+                data: { datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            type: 'logarithmic',
+                            title: {
+                                display: true,
+                                text: 'Agentic ROI (AROI) Efficiency Score (Log Scale)',
+                                color: '#9ca3af',
+                                font: { size: 11, family: 'Inter' }
+                            },
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: {
+                                color: '#6b7280',
+                                callback: function(value) {
+                                    return value.toExponential(1);
+                                }
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Total Strategy Return (%)',
+                                color: '#9ca3af',
+                                font: { size: 11, family: 'Inter' }
+                            },
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#6b7280' }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                color: '#f3f4f6',
+                                font: { size: 10, family: 'Inter' },
+                                boxWidth: 12
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const p = context.raw;
+                                    return `Gen ${p.generation}: Return: ${p.y.toFixed(2)}% | AROI: ${p.x.toExponential(3)}`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // ==========================================
+        // CHART 2: Safety Guardrail Comparative Bar Chart
+        // ==========================================
+        function updateOverviewBarChart() {
+            const ctx = document.getElementById("overviewBarChart").getContext("2d");
+            
+            // We want to compare Gemini 2.5 Pro Filtered vs Unfiltered, Gemini 2.5 Flash Filtered vs Unfiltered
+            const comparisonModels = [
+                { filtered: "google/gemini-2.5-pro (filtered)", unfiltered: "google/gemini-2.5-pro (unfiltered)", label: "Gemini 2.5 Pro" },
+                { filtered: "google/gemini-2.5-flash (filtered)", unfiltered: "google/gemini-2.5-flash (unfiltered)", label: "Gemini 2.5 Flash" }
+            ];
+
+            const labels = comparisonModels.map(m => m.label);
+            const filteredReturns = [];
+            const unfilteredReturns = [];
+            
+            comparisonModels.forEach(m => {
+                // Get Max Normal returns for each
+                let filtMax = 0;
+                if (rawData[m.filtered]) {
+                    const t = rawData[m.filtered]["trajectory"].filter(t => t["regime"] === "Normal");
+                    if (t.length > 0) filtMax = Math.max(...t.map(x => x["total_return_pct"]));
+                }
+                filteredReturns.push(filtMax);
+
+                let unfiltMax = 0;
+                if (rawData[m.unfiltered]) {
+                    const t = rawData[m.unfiltered]["trajectory"].filter(t => t["regime"] === "Normal");
+                    if (t.length > 0) unfiltMax = Math.max(...t.map(x => x["total_return_pct"]));
+                }
+                unfilteredReturns.push(unfiltMax);
+            });
+
+            if (overviewBarChartRef) {
+                overviewBarChartRef.destroy();
+            }
+
+            overviewBarChartRef = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Safety Filtered (Bounded)',
+                            data: filteredReturns,
+                            backgroundColor: 'rgba(59, 130, 246, 0.75)',
+                            borderColor: 'var(--accent-blue)',
+                            borderWidth: 1,
+                            borderRadius: 6
+                        },
+                        {
+                            label: 'Unfiltered (Unbounded)',
+                            data: unfilteredReturns,
+                            backgroundColor: 'rgba(239, 68, 68, 0.75)',
+                            borderColor: 'var(--accent-red)',
+                            borderWidth: 1,
+                            borderRadius: 6
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            grid: { display: false },
+                            ticks: { color: '#9ca3af' }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Maximum Evolution Normal Return (%)',
+                                color: '#9ca3af'
+                            },
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#6b7280' }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            labels: { color: '#f3f4f6', font: { family: 'Inter' } }
+                        }
+                    }
+                }
+            });
+        }
+
+        // ==========================================
+        // CHART 3: Evolution Line Chart
+        // ==========================================
+        function updateEvolutionLineChart() {
+            const ctx = document.getElementById("evolutionLineChart").getContext("2d");
+            
+            // Build datasets for selected models
+            const datasets = selectedModels.map((mKey, idx) => {
+                const modelVal = rawData[mKey];
+                const regimeTraj = modelVal["trajectory"].filter(t => t["regime"] === selectedRegime);
+                
+                // Sort by generation ascending
+                const sortedTraj = [...regimeTraj].sort((a,b) => a.generation - b.generation);
+                
+                const gens = sortedTraj.map(t => t["generation"]);
+                const values = sortedTraj.map(t => t[currentEvolutionMetric]);
+
+                const mColor = modelColors[mKey] || fallbackColors[idx % fallbackColors.length];
+
+                return {
+                    label: mKey.replace("google/", "").replace("deepinfra/", ""),
+                    data: values,
+                    borderColor: mColor,
+                    backgroundColor: mColor + '10', // 10% opacity glow filling
+                    borderWidth: 2.5,
+                    pointRadius: 4,
+                    pointHoverRadius: 7,
+                    tension: 0.25,
+                    fill: false
+                };
+            });
+
+            // Get generations count for labels (up to max gen)
+            let maxGen = 0;
+            selectedModels.forEach(mKey => {
+                if (rawData[mKey]) {
+                    rawData[mKey]["trajectory"].forEach(t => {
+                        if (t["generation"] > maxGen) maxGen = t["generation"];
+                    });
+                }
+            });
+
+            const labels = [];
+            for (let i = 0; i <= maxGen; i++) {
+                labels.push(`Gen ${i}`);
+            }
+
+            if (evolutionLineChartRef) {
+                evolutionLineChartRef.destroy();
+            }
+
+            // Metric display configuration
+            let yLabel = "Value";
+            let useLog = false;
+            if (currentEvolutionMetric === 'total_return_pct') yLabel = "Return (%)";
+            if (currentEvolutionMetric === 'efficiency_score_aroi') {
+                yLabel = "AROI Score Ratio";
+                useLog = true;
+            }
+            if (currentEvolutionMetric === 'max_drawdown_pct') yLabel = "Max Drawdown (%)";
+            if (currentEvolutionMetric === 'net_profit_loss_usd') yLabel = "Profit / Loss ($)";
+
+            evolutionLineChartRef = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#9ca3af' }
+                        },
+                        y: {
+                            type: useLog ? 'logarithmic' : 'linear',
+                            title: {
+                                display: true,
+                                text: yLabel,
+                                color: '#9ca3af',
+                                font: { size: 12, family: 'Plus Jakarta Sans', weight: '600' }
+                            },
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: {
+                                color: '#6b7280',
+                                callback: function(value) {
+                                    if (useLog) return value.toExponential(1);
+                                    if (currentEvolutionMetric === 'total_return_pct') return value.toFixed(1) + '%';
+                                    if (currentEvolutionMetric === 'net_profit_loss_usd') return '$' + value.toLocaleString();
+                                    return value;
+                                }
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                color: '#f3f4f6',
+                                font: { size: 11, family: 'Inter' },
+                                boxWidth: 15
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // ==========================================
+        // CHART 4: Cumulative Energy footprint
+        // ==========================================
+        function updateCumulativeEnergyChart() {
+            const ctx = document.getElementById("cumulativeEnergyChart").getContext("2d");
+            
+            const datasets = selectedModels.map((mKey, idx) => {
+                const modelVal = rawData[mKey];
+                const traj = modelVal["trajectory"];
+                
+                // Group energy by generation (Normal + Stress combined for that generation run)
+                const genEnergyMap = {};
+                traj.forEach(t => {
+                    const g = t["generation"];
+                    genEnergyMap[g] = (genEnergyMap[g] || 0) + t["total_energy_joules"];
+                });
+
+                const sortedGens = Object.keys(genEnergyMap).sort((a,b) => a-b);
+                
+                // Cumulative sum
+                let runningSum = 0;
+                const cumulativeValues = sortedGens.map(g => {
+                    runningSum += genEnergyMap[g];
+                    return runningSum / 1000.0; // convert to Kilojoules
+                });
+
+                const mColor = modelColors[mKey] || fallbackColors[idx % fallbackColors.length];
+
+                return {
+                    label: mKey.replace("google/", "").replace("deepinfra/", ""),
+                    data: cumulativeValues,
+                    borderColor: mColor,
+                    backgroundColor: mColor + '08',
+                    borderWidth: 2.5,
+                    pointRadius: 4,
+                    tension: 0.1,
+                    fill: true
+                };
+            });
+
+            // Make labels
+            let maxGen = 0;
+            selectedModels.forEach(mKey => {
+                if (rawData[mKey]) {
+                    rawData[mKey]["trajectory"].forEach(t => {
+                        if (t["generation"] > maxGen) maxGen = t["generation"];
+                    });
+                }
+            });
+
+            const labels = [];
+            for (let i = 0; i <= maxGen; i++) {
+                labels.push(`Gen ${i}`);
+            }
+
+            if (cumulativeEnergyChartRef) {
+                cumulativeEnergyChartRef.destroy();
+            }
+
+            cumulativeEnergyChartRef = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#9ca3af' }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Cumulative Energy Footprint (Kilojoules)',
+                                color: '#9ca3af',
+                                font: { size: 12, family: 'Plus Jakarta Sans', weight: '600' }
+                            },
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#6b7280' }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                color: '#f3f4f6',
+                                font: { size: 11, family: 'Inter' },
+                                boxWidth: 15
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // ==========================================
+        // LEADERBOARD TABLE RENDER
+        // ==========================================
+        function renderLeaderboard() {
+            const tbody = document.getElementById("leaderboard-tbody");
+            tbody.innerHTML = "";
+
+            const tableData = [];
+            
+            Object.entries(rawData).forEach(([mKey, mVal]) => {
+                const traj = mVal["trajectory"];
+                const regimeTraj = traj.filter(t => t["regime"] === selectedRegime);
+                
+                if (regimeTraj.length === 0) return;
+
+                // Find Peak stats
+                const peakRet = Math.max(...regimeTraj.map(t => t["total_return_pct"]));
+                const peakAROI = Math.max(...regimeTraj.map(t => t["efficiency_score_aroi"]));
+                
+                // Matching Sharpe and Drawdown of that peak return run or averages? Let's take maximums/extremes
+                const peakSharpe = Math.max(...regimeTraj.map(t => t["sharpe_ratio_annualized"]));
+                const minDrawdown = Math.min(...regimeTraj.map(t => t["max_drawdown_pct"]));
+                
+                // Cumulative totals
+                const totalEnergy = traj.reduce((sum, t) => sum + t["total_energy_joules"], 0);
+                const totalEnergyCost = traj.reduce((sum, t) => sum + t["energy_cost_usd"], 0);
+                const totalComputeCost = traj.reduce((sum, t) => sum + t["total_compute_cost_usd"], 0);
+
+                tableData.push({
+                    key: mKey,
+                    provider: mVal["provider"],
+                    model: mVal["model"],
+                    regime: mVal["regime"],
+                    peakReturn: peakRet,
+                    sharpe: peakSharpe,
+                    drawdown: minDrawdown,
+                    energy: totalEnergy,
+                    energyCost: totalEnergyCost,
+                    computeCost: totalComputeCost,
+                    peakAROI: peakAROI
+                });
+            });
+
+            // Apply Sorting
+            tableData.sort((a, b) => {
+                let valA, valB;
+                switch (sortCol) {
+                    case 0: valA = a.key; valB = b.key; break;
+                    case 1: valA = a.peakReturn; valB = b.peakReturn; break;
+                    case 2: valA = a.sharpe; valB = b.sharpe; break;
+                    case 3: valA = a.drawdown; valB = b.drawdown; break;
+                    case 4: valA = a.energy; valB = b.energy; break;
+                    case 5: valA = a.energyCost; valB = b.energyCost; break;
+                    case 6: valA = a.computeCost; valB = b.computeCost; break;
+                    case 7: valA = a.peakAROI; valB = b.peakAROI; break;
+                }
+
+                if (typeof valA === 'string') {
+                    return sortAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+                } else {
+                    return sortAsc ? valA - valB : valB - valA;
+                }
+            });
+
+            // Update header arrow classes
+            const headers = document.querySelectorAll("th");
+            headers.forEach((h, idx) => {
+                h.classList.remove("sorted-asc", "sorted-desc");
+                if (idx === sortCol) {
+                    h.classList.add(sortAsc ? "sorted-asc" : "sorted-desc");
+                }
+            });
+
+            tableData.forEach(row => {
+                const tr = document.createElement("tr");
+                
+                const providerClass = row.provider === 'google' ? 'provider-google' : 'provider-deepinfra';
+                const returnClass = row.peakReturn >= 0 ? 'trend-up' : 'trend-down';
+                const isChampion = row.peakReturn > 10.0 ? "💡" : "";
+
+                const cleanLabel = row.key.replace(" (filtered)", "").replace(" (unfiltered)", "");
+
+                tr.innerHTML = `
+                    <td>
+                        <div class="model-cell">
+                            <span class="provider-tag ${providerClass}">${row.provider}</span>
+                            <span title="${row.key}">${row.model}</span>
+                            <span style="font-size: 0.7rem; color: var(--text-muted)">(${row.regime})</span>
+                        </div>
+                    </td>
+                    <td class="mono ${returnClass}">${row.peakReturn.toFixed(2)}%</td>
+                    <td class="mono">${row.sharpe.toFixed(2)}</td>
+                    <td class="mono trend-down" style="color:rgba(239, 68, 68, 0.8)">${row.drawdown.toFixed(2)}%</td>
+                    <td class="mono">${(row.energy / 1000.0).toFixed(2)} KJ</td>
+                    <td class="mono" style="color:var(--accent-orange)">$${row.energyCost.toFixed(4)}</td>
+                    <td class="mono" style="color:var(--accent-blue)">$${row.computeCost.toFixed(2)}</td>
+                    <td class="mono text-primary" style="font-weight:600">${row.peakAROI.toExponential(3)}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function sortTable(colIdx) {
+            if (sortCol === colIdx) {
+                sortAsc = !sortAsc;
+            } else {
+                sortCol = colIdx;
+                sortAsc = false; // default descending on first click
+            }
+            renderLeaderboard();
+        }
+
+        // Modal triggers for static reports image preview
+        function openModal(imgSrc) {
+            document.getElementById("modal-img-src").src = imgSrc;
+            document.getElementById("image-modal").style.display = "flex";
+        }
+
+        function closeModal() {
+            document.getElementById("image-modal").style.display = "none";
+        }
+    </script>
+</body>
+</html>
